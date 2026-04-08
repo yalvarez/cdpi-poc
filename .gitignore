@@ -1,9 +1,16 @@
-# Environment files — NEVER commit these
+# Environment files — NEVER commit
 .env
 .env.local
 *.env.backup-*
 
-# Agent runtime data
+# INJI generated keystore — contains private keys
+inji/certs/*.p12
+inji/certs/*.key
+inji/certs/*.crt
+# Keep the placeholder
+!inji/certs/.gitkeep
+
+# CREDEBL agent runtime data
 credebl/config/agent-config/
 credebl/config/agent-token/
 

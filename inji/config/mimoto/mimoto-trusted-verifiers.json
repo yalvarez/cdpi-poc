@@ -1,0 +1,8 @@
+{
+  "verifiers": [
+    {
+      "client_id": "cdpi-poc-verifier",
+      "redirect_uri": "http://YOUR_VPS_IP:3001/verify"
+    }
+  ]
+}

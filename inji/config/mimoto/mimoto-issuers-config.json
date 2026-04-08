@@ -1,0 +1,34 @@
+{
+  "issuers": [
+    {
+      "credential_issuer": "http://YOUR_VPS_IP:8091/v1/certify",
+      "client_id": "inji-certify-client",
+      "redirect_uri": "http://YOUR_VPS_IP:3001/home",
+      "additional_headers": {
+        "Content-Type": "application/json"
+      },
+      "scopes_supported": [
+        "EmploymentCertification",
+        "EducationalCredential",
+        "ProfessionalLicense",
+        "CivilIdentity"
+      ],
+      "display": [
+        {
+          "name": "CDPI PoC Issuer",
+          "locale": "en",
+          "logo": {
+            "url": "https://cdpi.dev/wp-content/uploads/2023/04/cdpi-logo.png",
+            "alt_text": "CDPI Logo"
+          },
+          "description": "Centre for Digital Public Infrastructure — PoC Credential Issuer"
+        },
+        {
+          "name": "Emisor CDPI PoC",
+          "locale": "es",
+          "description": "Centro para Infraestructura Pública Digital — Emisor de Credenciales PoC"
+        }
+      ]
+    }
+  ]
+}

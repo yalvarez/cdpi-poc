@@ -1,0 +1,97 @@
+{
+  "_comment": "=================================================================",
+  "_comment2": "CDPI PoC — CREDEBL Master Table (Seed Data)",
+  "_comment3": "-----------------------------------------------------------------",
+  "_comment4": "This file seeds the CREDEBL database with the minimum reference",
+  "_comment5": "data required for the platform to function.",
+  "_comment6": "",
+  "_comment7": "Original source: github.com/credebl/install",
+  "_comment8": "  local-deployment/libs/prisma-service/prisma/data/",
+  "_comment9": "  credebl-master-table.json",
+  "_comment10": "",
+  "_comment11": "This PoC version contains only the data needed for SD-JWT VC",
+  "_comment12": "issuance on BCovrin Testnet. For AnonCreds on other networks,",
+  "_comment13": "add entries to the ledgers array following the same structure.",
+  "_comment14": "=================================================================",
+
+  "ledgers": [
+    {
+      "id": "b0cf29f0-3a7d-48ea-9075-39ea8f2f0b14",
+      "name": "BCovrin Test Network",
+      "networkType": "testnet",
+      "networkString": "bcovrin:test",
+      "indyNamespace": "bcovrin:test",
+      "genesisTransactions": "http://test.bcovrin.vonx.io/genesis",
+      "isActive": true,
+      "isDefault": true,
+      "poolConfig": null,
+      "isProduction": false,
+      "registerDIDEndpoint": "http://test.bcovrin.vonx.io/register",
+      "registerDIDOptions": {
+        "method": "POST",
+        "body": {
+          "role": "ENDORSER",
+          "alias": null
+        }
+      }
+    },
+    {
+      "id": "a8a9eaf1-a5b0-4df5-9e6c-2c3ae4d2a5b1",
+      "name": "Indicio Test Network",
+      "networkType": "testnet",
+      "networkString": "indicio:test",
+      "indyNamespace": "indicio:test",
+      "genesisTransactions": "https://raw.githubusercontent.com/Indicio-tech/indicio-network/main/genesis_files/pool_transactions_testnet_genesis",
+      "isActive": true,
+      "isDefault": false,
+      "poolConfig": null,
+      "isProduction": false,
+      "registerDIDEndpoint": "https://selfserve.indiciotech.io/nym",
+      "registerDIDOptions": {
+        "method": "POST",
+        "body": {
+          "network": "testnet"
+        }
+      }
+    }
+  ],
+
+  "org_agents_type": [
+    {
+      "id": "eff67cd9-0a32-48db-b947-24e3c9d4f11f",
+      "agent": "SHARED",
+      "createDateTime": "2024-01-01T00:00:00.000Z",
+      "lastChangedDateTime": "2024-01-01T00:00:00.000Z",
+      "deletedAt": null,
+      "isActive": true
+    },
+    {
+      "id": "4b7e8d2a-52b3-41f2-b3d9-0d7a9f1c2e3b",
+      "agent": "DEDICATED",
+      "createDateTime": "2024-01-01T00:00:00.000Z",
+      "lastChangedDateTime": "2024-01-01T00:00:00.000Z",
+      "deletedAt": null,
+      "isActive": true
+    }
+  ],
+
+  "client_config": [
+    {
+      "id": "c1d2e3f4-a5b6-7890-cdef-1234567890ab",
+      "clientId": "credebl-client",
+      "name": "CREDEBL Platform",
+      "tenantId": null,
+      "createDateTime": "2024-01-01T00:00:00.000Z",
+      "lastChangedDateTime": "2024-01-01T00:00:00.000Z",
+      "deletedAt": null,
+      "isActive": true
+    }
+  ],
+
+  "_notes": {
+    "bcovrin_test": "BCovrin Test is a public permissioned Hyperledger Indy testnet operated by BC Gov. DIDs can be registered freely at http://test.bcovrin.vonx.io. This is the recommended network for PoC use.",
+    "indicio_test": "Indicio Test Network is included as a backup option. Self-service DID registration at https://selfserve.indiciotech.io.",
+    "sd_jwt_vc": "For SD-JWT VC format (this PoC's primary format), the ledger is used only for AnonCreds schema/cred-def registration. SD-JWT VCs do not require an Indy ledger — they use DID:web or DID:JWK for issuer key resolution. The ledger entries above are needed only if AnonCreds credentials are also being issued.",
+    "adding_networks": "To add more networks (e.g. Sovrin Staging, Candy Dev), copy the BCovrin entry and update id, name, networkString, indyNamespace, genesisTransactions, and registerDIDEndpoint. Generate a new UUID for the id field."
+  }
+}
