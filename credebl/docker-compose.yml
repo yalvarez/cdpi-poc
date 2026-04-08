@@ -1,0 +1,512 @@
+# =============================================================================
+# CDPI PoC — CREDEBL Stack (Self-Contained)
+# -----------------------------------------------------------------------------
+# Replaces:  AWS S3   → MinIO   (S3-compatible, fully containerized)
+#            SendGrid → Mailpit  (local SMTP, no external dependencies)
+#            Keycloak → included (used as OIDC provider + mock)
+#
+# Excluded for PoC (non-critical for issuance/verification):
+#   cloud-wallet, geolocation, notification, webhook
+#
+# RAM budget (~8GB VPS):
+#   Infrastructure (postgres, redis, nats, keycloak, minio, mailpit) ~2.5GB
+#   CREDEBL services (13 microservices)                              ~4.0GB
+#   OS + Docker overhead                                             ~1.0GB
+#   Buffer                                                           ~0.5GB
+#
+# Usage:
+#   cp .env.example .env        # then fill in values
+#   docker compose up -d
+#   docker compose logs -f api-gateway
+# =============================================================================
+
+name: cdpi-credebl
+
+# ---------------------------------------------------------------------------
+# Infrastructure services
+# ---------------------------------------------------------------------------
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: credebl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-credebl}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-credebl}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-credebl} -d ${POSTGRES_DB:-credebl}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.4-alpine
+    container_name: credebl-redis
+    restart: unless-stopped
+    command: redis-server --save 20 1 --loglevel warning --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── NATS ────────────────────────────────────────────────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    container_name: credebl-nats
+    restart: unless-stopped
+    entrypoint: ["/nats-server", "--jetstream", "--store_dir=/data", "-DV"]
+    volumes:
+      - nats_data:/data
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── Keycloak (OIDC provider + mock for PoC) ─────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0.6
+    container_name: credebl-keycloak
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-credebl}
+      KC_DB_USERNAME: ${POSTGRES_USER:-credebl}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_DB_SCHEMA: keycloak
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HTTP_PORT: 8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - ./config/keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  # ── MinIO (S3-compatible — replaces AWS S3) ─────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: credebl-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── MinIO setup (creates buckets and access keys) ───────────────────────────
+  minio-setup:
+    image: minio/mc:latest
+    container_name: credebl-minio-setup
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ACCESS_KEY: ${AWS_ACCESS_KEY_ID}
+      MINIO_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY}
+      MINIO_BUCKET: ${S3_BUCKET_NAME:-credebl-bucket}
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
+        mc mb --ignore-existing local/$$MINIO_BUCKET;
+        mc mb --ignore-existing local/$$MINIO_BUCKET/default;
+        mc mb --ignore-existing local/$$MINIO_BUCKET/persist;
+        mc mb --ignore-existing local/$$MINIO_BUCKET/orgLogos;
+        mc anonymous set public local/$$MINIO_BUCKET/default;
+        mc anonymous set public local/$$MINIO_BUCKET/orgLogos;
+        mc admin user add local $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY;
+        mc admin policy attach local readwrite --user $$MINIO_ACCESS_KEY;
+        echo 'MinIO setup complete';
+      "
+    networks:
+      - credebl-net
+
+  # ── Mailpit (SMTP mock — replaces SendGrid) ─────────────────────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: credebl-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI — view sent emails at http://VPS_IP:8025
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ── Schema File Server ──────────────────────────────────────────────────────
+  schema-file-server:
+    image: ghcr.io/credebl/schema-file-server:latest
+    container_name: credebl-schema-file-server
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # CREDEBL Platform services
+  # ---------------------------------------------------------------------------
+
+  # ── Seed (runs once, populates DB, then exits) ──────────────────────────────
+  seed:
+    image: ghcr.io/credebl/seed:latest
+    container_name: credebl-seed
+    restart: "no"
+    env_file: .env
+    volumes:
+      - ./config/credebl-master-table.json:/app/libs/prisma-service/prisma/data/credebl-master-table.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks:
+      - credebl-net
+
+  # ── API Gateway ─────────────────────────────────────────────────────────────
+  api-gateway:
+    image: ghcr.io/credebl/api-gateway:latest
+    container_name: credebl-api-gateway
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "5000:5000"
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── User service ────────────────────────────────────────────────────────────
+  user:
+    image: ghcr.io/credebl/user:latest
+    container_name: credebl-user
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── Utility service ─────────────────────────────────────────────────────────
+  utility:
+    image: ghcr.io/credebl/utility:latest
+    container_name: credebl-utility
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── Connection service ──────────────────────────────────────────────────────
+  connection:
+    image: ghcr.io/credebl/connection:latest
+    container_name: credebl-connection
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      utility:
+        condition: service_started
+      user:
+        condition: service_started
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── Issuance service ────────────────────────────────────────────────────────
+  issuance:
+    image: ghcr.io/credebl/issuance:latest
+    container_name: credebl-issuance
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      user:
+        condition: service_started
+      connection:
+        condition: service_started
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  # ── Ledger service ──────────────────────────────────────────────────────────
+  ledger:
+    image: ghcr.io/credebl/ledger:latest
+    container_name: credebl-ledger
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      user:
+        condition: service_started
+      connection:
+        condition: service_started
+      issuance:
+        condition: service_started
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── Organization service ────────────────────────────────────────────────────
+  organization:
+    image: ghcr.io/credebl/organization:latest
+    container_name: credebl-organization
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      user:
+        condition: service_started
+      connection:
+        condition: service_started
+      issuance:
+        condition: service_started
+      ledger:
+        condition: service_started
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  # ── Verification service ────────────────────────────────────────────────────
+  verification:
+    image: ghcr.io/credebl/verification:latest
+    container_name: credebl-verification
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      user:
+        condition: service_started
+      connection:
+        condition: service_started
+      issuance:
+        condition: service_started
+      ledger:
+        condition: service_started
+      organization:
+        condition: service_started
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  # ── Agent Provisioning ──────────────────────────────────────────────────────
+  agent-provisioning:
+    image: ghcr.io/credebl/agent-provisioning:latest
+    container_name: credebl-agent-provisioning
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - ROOT_PATH=/app/agent-provisioning/AFJ/agent-config
+    volumes:
+      - agent_config:/app/agent-provisioning/AFJ/agent-config
+      - agent_token:/app/agent-provisioning/AFJ/token
+      - ./config/agent.env:/app/agent.env:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      organization:
+        condition: service_started
+      verification:
+        condition: service_started
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── Agent Service ───────────────────────────────────────────────────────────
+  agent-service:
+    image: ghcr.io/credebl/agent-service:latest
+    container_name: credebl-agent-service
+    restart: unless-stopped
+    env_file: .env
+    command: >
+      sh -c 'until (docker logs credebl-agent-provisioning 2>&1 | grep "Agent-Provisioning-Service Microservice is listening to NATS"); do sleep 2; done && node dist/apps/agent-service/main.js'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent_config:/app/agent-provisioning/AFJ/agent-config
+      - agent_token:/app/agent-provisioning/AFJ/token
+    depends_on:
+      - agent-provisioning
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  nats_data:
+    driver: local
+  minio_data:
+    driver: local
+  agent_config:
+    driver: local
+  agent_token:
+    driver: local
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+networks:
+  credebl-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

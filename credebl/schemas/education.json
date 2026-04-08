@@ -1,0 +1,242 @@
+{
+  "_comment": "=================================================================",
+  "_comment2": "CDPI PoC — Educational Credential / Degree",
+  "_comment3": "Format: SD-JWT VC (draft-ietf-oauth-sd-jwt-vc)",
+  "_comment4": "Use case: Certifies academic degree or educational achievement",
+  "_comment5": "Issuer: Ministry of Education / accredited university / SINAES",
+  "_comment6": "Typical verifiers: Employers, other universities, licensing boards",
+  "_comment7": "=================================================================",
+
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://schemas.cdpi-poc.local/education/v1",
+    "title": "Educational Credential",
+    "description": "Verifiable credential certifying an academic degree or educational achievement issued by an accredited institution.",
+    "type": "object",
+    "required": [
+      "vct", "iss", "iat",
+      "given_name", "family_name", "document_number",
+      "institution_name", "institution_id",
+      "credential_title", "credential_level",
+      "field_of_study", "graduation_date", "credential_status"
+    ],
+    "properties": {
+
+      "vct": {
+        "type": "string",
+        "const": "https://schemas.cdpi-poc.local/education/v1"
+      },
+      "iss": { "type": "string" },
+      "iat": { "type": "integer" },
+      "exp": { "type": "integer" },
+
+      "given_name": {
+        "type": "string",
+        "description": "Graduate's given name(s)",
+        "examples": ["Carlos Andrés"]
+      },
+      "family_name": {
+        "type": "string",
+        "description": "Graduate's family name(s)",
+        "examples": ["Ramírez Solano"]
+      },
+      "birthdate": {
+        "type": "string",
+        "format": "date",
+        "description": "Graduate's date of birth (ISO 8601)"
+      },
+      "document_number": {
+        "type": "string",
+        "description": "National identity document number of the graduate",
+        "examples": ["0102030405"]
+      },
+      "nationality": {
+        "type": "string",
+        "description": "Graduate nationality (ISO 3166-1 alpha-2)"
+      },
+
+      "institution_name": {
+        "type": "string",
+        "description": "Full legal name of the issuing institution",
+        "examples": ["Universidad Nacional Autónoma de Honduras"]
+      },
+      "institution_id": {
+        "type": "string",
+        "description": "Official institutional registration code",
+        "examples": ["UNAH-001"]
+      },
+      "institution_country": {
+        "type": "string",
+        "description": "Country where institution is registered (ISO 3166-1 alpha-2)",
+        "examples": ["HN"]
+      },
+      "institution_accreditation": {
+        "type": "string",
+        "description": "Accreditation body and status",
+        "examples": ["ACREDITA CI — Acreditado"]
+      },
+
+      "credential_title": {
+        "type": "string",
+        "description": "Official title of the degree or credential",
+        "examples": ["Licenciado en Ingeniería en Sistemas"]
+      },
+      "credential_level": {
+        "type": "string",
+        "enum": ["technician", "associate", "bachelor", "specialization", "master", "doctorate", "postdoctorate"],
+        "description": "Academic level of the credential"
+      },
+      "field_of_study": {
+        "type": "string",
+        "description": "Area or field of study",
+        "examples": ["Ingeniería en Sistemas Computacionales"]
+      },
+      "program_code": {
+        "type": "string",
+        "description": "Official academic program code",
+        "examples": ["IS-2018-001"]
+      },
+      "graduation_date": {
+        "type": "string",
+        "format": "date",
+        "description": "Official graduation or conferral date (ISO 8601)",
+        "examples": ["2022-11-25"]
+      },
+      "enrollment_start_date": {
+        "type": "string",
+        "format": "date",
+        "description": "Date of enrollment in the program"
+      },
+      "final_grade": {
+        "type": "string",
+        "description": "Final grade or GPA (format varies by institution)",
+        "examples": ["90/100", "3.8/4.0", "Muy Bueno"]
+      },
+      "honors": {
+        "type": "string",
+        "enum": ["none", "cum_laude", "magna_cum_laude", "summa_cum_laude"],
+        "description": "Academic honors distinction"
+      },
+      "credential_status": {
+        "type": "string",
+        "enum": ["active", "revoked", "expired"],
+        "description": "Current status of the credential"
+      },
+      "diploma_number": {
+        "type": "string",
+        "description": "Official diploma or certificate number",
+        "examples": ["UNAH-2022-IS-004521"]
+      },
+      "registration_number": {
+        "type": "string",
+        "description": "Professional registration number if applicable",
+        "examples": ["COL-IS-2023-00891"]
+      }
+    }
+  },
+
+  "vct_type_metadata": {
+    "vct": "https://schemas.cdpi-poc.local/education/v1",
+    "name": "Educational Credential",
+    "description": "Academic degree or educational achievement credential.",
+    "display": [
+      {
+        "lang": "en",
+        "name": "Educational Credential",
+        "description": "Issued by an accredited academic institution",
+        "background_color": "#27500A",
+        "text_color": "#FFFFFF"
+      },
+      {
+        "lang": "es",
+        "name": "Credencial Educativa",
+        "description": "Emitida por institución académica acreditada",
+        "background_color": "#27500A",
+        "text_color": "#FFFFFF"
+      }
+    ],
+    "claims": [
+      { "path": ["given_name"],             "display": [{ "lang": "en", "label": "Given Name" },             { "lang": "es", "label": "Nombre(s)" }] },
+      { "path": ["family_name"],            "display": [{ "lang": "en", "label": "Family Name" },            { "lang": "es", "label": "Apellido(s)" }] },
+      { "path": ["document_number"],        "display": [{ "lang": "en", "label": "Document Number" },        { "lang": "es", "label": "Número de Documento" }] },
+      { "path": ["institution_name"],       "display": [{ "lang": "en", "label": "Institution" },            { "lang": "es", "label": "Institución" }] },
+      { "path": ["credential_title"],       "display": [{ "lang": "en", "label": "Degree / Title" },         { "lang": "es", "label": "Título / Grado" }] },
+      { "path": ["credential_level"],       "display": [{ "lang": "en", "label": "Academic Level" },         { "lang": "es", "label": "Nivel Académico" }] },
+      { "path": ["field_of_study"],         "display": [{ "lang": "en", "label": "Field of Study" },         { "lang": "es", "label": "Área de Estudio" }] },
+      { "path": ["graduation_date"],        "display": [{ "lang": "en", "label": "Graduation Date" },        { "lang": "es", "label": "Fecha de Graduación" }] },
+      { "path": ["final_grade"],            "display": [{ "lang": "en", "label": "Final Grade" },            { "lang": "es", "label": "Nota Final" }] },
+      { "path": ["honors"],                 "display": [{ "lang": "en", "label": "Honors" },                 { "lang": "es", "label": "Distinción" }] },
+      { "path": ["diploma_number"],         "display": [{ "lang": "en", "label": "Diploma Number" },         { "lang": "es", "label": "Número de Diploma" }] },
+      { "path": ["registration_number"],    "display": [{ "lang": "en", "label": "Registration Number" },    { "lang": "es", "label": "Número de Matrícula" }] },
+      { "path": ["credential_status"],      "display": [{ "lang": "en", "label": "Status" },                 { "lang": "es", "label": "Estado" }] }
+    ]
+  },
+
+  "disclosure_frame": {
+    "_sd": [
+      "birthdate",
+      "document_number",
+      "nationality",
+      "institution_id",
+      "institution_accreditation",
+      "program_code",
+      "enrollment_start_date",
+      "final_grade",
+      "honors",
+      "registration_number"
+    ],
+    "_always_revealed": [
+      "given_name",
+      "family_name",
+      "institution_name",
+      "institution_country",
+      "credential_title",
+      "credential_level",
+      "field_of_study",
+      "graduation_date",
+      "credential_status",
+      "diploma_number"
+    ],
+    "_rationale": {
+      "always_revealed": "Name, institution, degree, field, and graduation date are the core verification data with low privacy sensitivity — needed for every employment or enrollment verification.",
+      "selectively_disclosable": "Document number, grade, honors, and internal codes are sensitive or context-specific — the holder discloses them only when required (e.g., graduate admissions vs. basic employment check)."
+    }
+  },
+
+  "sample_credential_data": {
+    "given_name": "Carlos Andrés",
+    "family_name": "Ramírez Solano",
+    "birthdate": "1998-07-22",
+    "document_number": "0102030405",
+    "nationality": "HN",
+    "institution_name": "Universidad Nacional Autónoma de Honduras",
+    "institution_id": "UNAH-001",
+    "institution_country": "HN",
+    "institution_accreditation": "ACREDITA CI — Acreditado",
+    "credential_title": "Licenciado en Ingeniería en Sistemas",
+    "credential_level": "bachelor",
+    "field_of_study": "Ingeniería en Sistemas Computacionales",
+    "program_code": "IS-2018-001",
+    "graduation_date": "2022-11-25",
+    "enrollment_start_date": "2018-02-01",
+    "final_grade": "88/100",
+    "honors": "none",
+    "credential_status": "active",
+    "diploma_number": "UNAH-2022-IS-004521",
+    "registration_number": "COL-IS-2023-00891"
+  },
+
+  "credebl_api_payload": {
+    "name": "EducationalCredential",
+    "version": "1.0",
+    "schemaType": "SD_JWT_VC",
+    "vct": "https://schemas.cdpi-poc.local/education/v1",
+    "attributes": [
+      "given_name", "family_name", "birthdate", "document_number", "nationality",
+      "institution_name", "institution_id", "institution_country", "institution_accreditation",
+      "credential_title", "credential_level", "field_of_study", "program_code",
+      "graduation_date", "enrollment_start_date", "final_grade", "honors",
+      "credential_status", "diploma_number", "registration_number"
+    ]
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "realm": "credebl-realm",
+  "displayName": "CDPI PoC Realm",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "accessTokenLifespan": 86400,
+  "clients": [
+    {
+      "clientId": "credebl-client",
+      "name": "CREDEBL Platform Client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:5000/*",
+        "http://localhost:3000/*",
+        "${API_ENDPOINT}/*"
+      ],
+      "webOrigins": ["*"],
+      "defaultClientScopes": [
+        "web-origins",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ]
+    },
+    {
+      "clientId": "credebl-wallet-client",
+      "name": "CREDEBL Wallet Client (public)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "inji://callback",
+        "openid://callback",
+        "http://localhost:*"
+      ],
+      "webOrigins": ["*"]
+    }
+  ],
+  "roles": {
+    "realm": [
+      { "name": "platform-admin", "description": "CREDEBL platform administrator" },
+      { "name": "org-admin", "description": "Organization administrator" },
+      { "name": "issuer", "description": "Credential issuer" },
+      { "name": "verifier", "description": "Credential verifier" },
+      { "name": "holder", "description": "Credential holder" }
+    ]
+  },
+  "users": [
+    {
+      "username": "platform-admin",
+      "email": "admin@cdpi-poc.local",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Platform",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_ADMIN_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["platform-admin"]
+    }
+  ]
+}

@@ -1,0 +1,263 @@
+{
+  "_comment": "=================================================================",
+  "_comment2": "CDPI PoC — Employment Certification Credential",
+  "_comment3": "Format: SD-JWT VC (draft-ietf-oauth-sd-jwt-vc)",
+  "_comment4": "Use case: Certifies current or past employment relationship",
+  "_comment5": "Issuer: Ministry of Labor / employer registry / HR system",
+  "_comment6": "Typical verifiers: Banks, other employers, public services",
+  "_comment7": "=================================================================",
+
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://schemas.cdpi-poc.local/employment/v1",
+    "title": "Employment Certification",
+    "description": "Verifiable credential certifying an employment relationship issued by an authorized government or institutional issuer.",
+    "type": "object",
+    "required": [
+      "vct",
+      "iss",
+      "iat",
+      "given_name",
+      "family_name",
+      "document_number",
+      "employer_name",
+      "employer_id",
+      "employment_status",
+      "position_title",
+      "employment_start_date"
+    ],
+    "properties": {
+
+      "vct": {
+        "type": "string",
+        "const": "https://schemas.cdpi-poc.local/employment/v1",
+        "description": "Credential type identifier — non-disclosable"
+      },
+      "iss": {
+        "type": "string",
+        "description": "Issuer DID or URL — non-disclosable"
+      },
+      "iat": {
+        "type": "integer",
+        "description": "Issuance time (Unix timestamp) — non-disclosable"
+      },
+      "exp": {
+        "type": "integer",
+        "description": "Expiration time (Unix timestamp) — non-disclosable"
+      },
+
+      "given_name": {
+        "type": "string",
+        "description": "Employee's given name(s)",
+        "examples": ["María José"]
+      },
+      "family_name": {
+        "type": "string",
+        "description": "Employee's family name(s)",
+        "examples": ["García Pérez"]
+      },
+      "birthdate": {
+        "type": "string",
+        "format": "date",
+        "description": "Employee date of birth (ISO 8601)",
+        "examples": ["1985-03-14"]
+      },
+      "document_number": {
+        "type": "string",
+        "description": "National identity document number of the employee",
+        "examples": ["001-1985031-4"]
+      },
+      "nationality": {
+        "type": "string",
+        "description": "Employee nationality (ISO 3166-1 alpha-2)",
+        "examples": ["DO"]
+      },
+
+      "employer_name": {
+        "type": "string",
+        "description": "Legal name of the employing organization",
+        "examples": ["Ministerio de Educación"]
+      },
+      "employer_id": {
+        "type": "string",
+        "description": "Official employer registration number (RNC or equivalent)",
+        "examples": ["4-01-50001-8"]
+      },
+      "employer_sector": {
+        "type": "string",
+        "description": "Economic sector of the employer",
+        "examples": ["Public administration"]
+      },
+
+      "employment_status": {
+        "type": "string",
+        "enum": ["active", "terminated", "suspended", "on_leave"],
+        "description": "Current employment status"
+      },
+      "employment_type": {
+        "type": "string",
+        "enum": ["permanent", "fixed_term", "part_time", "contract", "internship"],
+        "description": "Type of employment contract"
+      },
+      "position_title": {
+        "type": "string",
+        "description": "Official job title or position name",
+        "examples": ["Técnico en Sistemas de Información"]
+      },
+      "department": {
+        "type": "string",
+        "description": "Department or organizational unit",
+        "examples": ["Dirección General de Tecnología"]
+      },
+      "employment_start_date": {
+        "type": "string",
+        "format": "date",
+        "description": "Start date of the employment relationship (ISO 8601)",
+        "examples": ["2018-06-01"]
+      },
+      "employment_end_date": {
+        "type": "string",
+        "format": "date",
+        "description": "End date of employment (ISO 8601) — only present if employment_status is terminated",
+        "examples": ["2023-12-31"]
+      },
+
+      "gross_salary": {
+        "type": "number",
+        "description": "Monthly gross salary in local currency — highly sensitive, selective disclosure recommended",
+        "examples": [45000.00]
+      },
+      "salary_currency": {
+        "type": "string",
+        "description": "Currency of the salary (ISO 4217)",
+        "examples": ["DOP"]
+      },
+
+      "issuer_name": {
+        "type": "string",
+        "description": "Name of the issuing institution",
+        "examples": ["Ministerio de Trabajo"]
+      },
+      "certificate_number": {
+        "type": "string",
+        "description": "Official certificate or document number",
+        "examples": ["CERT-2024-0001234"]
+      }
+    }
+  },
+
+  "vct_type_metadata": {
+    "vct": "https://schemas.cdpi-poc.local/employment/v1",
+    "name": "Employment Certification",
+    "description": "Verifiable credential certifying an employment relationship.",
+    "display": [
+      {
+        "lang": "en",
+        "name": "Employment Certification",
+        "description": "Issued by Ministry of Labor or authorized employer registry",
+        "background_color": "#1A5EA0",
+        "text_color": "#FFFFFF",
+        "rendering": {
+          "simple": {
+            "logo": {
+              "alt_text": "Employment Certificate"
+            },
+            "background_color": "#1A5EA0",
+            "text_color": "#FFFFFF"
+          }
+        }
+      },
+      {
+        "lang": "es",
+        "name": "Certificación de Empleo",
+        "description": "Emitida por el Ministerio de Trabajo o registro empleador autorizado",
+        "background_color": "#1A5EA0",
+        "text_color": "#FFFFFF"
+      }
+    ],
+    "claims": [
+      { "path": ["given_name"],           "display": [{ "lang": "en", "label": "Given Name" },          { "lang": "es", "label": "Nombre(s)" }] },
+      { "path": ["family_name"],          "display": [{ "lang": "en", "label": "Family Name" },         { "lang": "es", "label": "Apellido(s)" }] },
+      { "path": ["birthdate"],            "display": [{ "lang": "en", "label": "Date of Birth" },       { "lang": "es", "label": "Fecha de Nacimiento" }] },
+      { "path": ["document_number"],      "display": [{ "lang": "en", "label": "Document Number" },     { "lang": "es", "label": "Número de Documento" }] },
+      { "path": ["employer_name"],        "display": [{ "lang": "en", "label": "Employer" },            { "lang": "es", "label": "Empleador" }] },
+      { "path": ["employer_id"],          "display": [{ "lang": "en", "label": "Employer ID" },         { "lang": "es", "label": "RNC / ID Empleador" }] },
+      { "path": ["employment_status"],    "display": [{ "lang": "en", "label": "Employment Status" },   { "lang": "es", "label": "Estado Laboral" }] },
+      { "path": ["employment_type"],      "display": [{ "lang": "en", "label": "Contract Type" },       { "lang": "es", "label": "Tipo de Contrato" }] },
+      { "path": ["position_title"],       "display": [{ "lang": "en", "label": "Position" },            { "lang": "es", "label": "Cargo" }] },
+      { "path": ["department"],           "display": [{ "lang": "en", "label": "Department" },          { "lang": "es", "label": "Departamento" }] },
+      { "path": ["employment_start_date"],"display": [{ "lang": "en", "label": "Start Date" },          { "lang": "es", "label": "Fecha de Inicio" }] },
+      { "path": ["employment_end_date"],  "display": [{ "lang": "en", "label": "End Date" },            { "lang": "es", "label": "Fecha de Terminación" }] },
+      { "path": ["gross_salary"],         "display": [{ "lang": "en", "label": "Monthly Salary" },      { "lang": "es", "label": "Salario Mensual" }] },
+      { "path": ["salary_currency"],      "display": [{ "lang": "en", "label": "Currency" },            { "lang": "es", "label": "Moneda" }] },
+      { "path": ["certificate_number"],   "display": [{ "lang": "en", "label": "Certificate Number" },  { "lang": "es", "label": "Número de Certificado" }] }
+    ]
+  },
+
+  "disclosure_frame": {
+    "_comment": "Claims listed under _sd are SELECTIVELY DISCLOSABLE.",
+    "_comment2": "Claims NOT listed are always revealed when the credential is presented.",
+    "_sd": [
+      "birthdate",
+      "document_number",
+      "nationality",
+      "employer_id",
+      "employer_sector",
+      "employment_type",
+      "department",
+      "employment_end_date",
+      "gross_salary",
+      "salary_currency"
+    ],
+    "_always_revealed": [
+      "given_name",
+      "family_name",
+      "employer_name",
+      "employment_status",
+      "position_title",
+      "employment_start_date",
+      "certificate_number"
+    ],
+    "_rationale": {
+      "always_revealed": "Name, employer, position, status, and start date are the minimum needed for most verifications and carry low privacy risk.",
+      "selectively_disclosable": "Document number, birthdate, salary, and contract details are sensitive — holder decides what to share per verification context."
+    }
+  },
+
+  "sample_credential_data": {
+    "_comment": "Sample data for PoC testing — replace with real country data on Day 5",
+    "given_name": "María José",
+    "family_name": "García Pérez",
+    "birthdate": "1985-03-14",
+    "document_number": "001-1985031-4",
+    "nationality": "DO",
+    "employer_name": "Ministerio de Educación",
+    "employer_id": "4-01-50001-8",
+    "employer_sector": "Public administration",
+    "employment_status": "active",
+    "employment_type": "permanent",
+    "position_title": "Técnico en Sistemas de Información",
+    "department": "Dirección General de Tecnología",
+    "employment_start_date": "2018-06-01",
+    "gross_salary": 45000.00,
+    "salary_currency": "DOP",
+    "issuer_name": "Ministerio de Trabajo",
+    "certificate_number": "CERT-2024-0001234"
+  },
+
+  "credebl_api_payload": {
+    "_comment": "Payload format for CREDEBL POST /schema/create endpoint",
+    "name": "EmploymentCertification",
+    "version": "1.0",
+    "schemaType": "SD_JWT_VC",
+    "vct": "https://schemas.cdpi-poc.local/employment/v1",
+    "attributes": [
+      "given_name", "family_name", "birthdate", "document_number", "nationality",
+      "employer_name", "employer_id", "employer_sector",
+      "employment_status", "employment_type", "position_title", "department",
+      "employment_start_date", "employment_end_date",
+      "gross_salary", "salary_currency",
+      "issuer_name", "certificate_number"
+    ]
+  }
+}

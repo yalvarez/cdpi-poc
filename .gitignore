@@ -1,0 +1,17 @@
+# Environment files — NEVER commit these
+.env
+.env.local
+*.env.backup-*
+
+# Agent runtime data
+credebl/config/agent-config/
+credebl/config/agent-token/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,236 @@
+{
+  "_comment": "=================================================================",
+  "_comment2": "CDPI PoC — Professional License Credential",
+  "_comment3": "Format: SD-JWT VC (draft-ietf-oauth-sd-jwt-vc)",
+  "_comment4": "Use case: Certifies a person is licensed to practice a profession",
+  "_comment5": "Issuer: Professional licensing board / Ministry / Colegio Profesional",
+  "_comment6": "Typical verifiers: Employers, hospitals, government contracts, banks",
+  "_comment7": "=================================================================",
+
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://schemas.cdpi-poc.local/professional-license/v1",
+    "title": "Professional License",
+    "description": "Verifiable credential certifying the holder is licensed to practice a regulated profession.",
+    "type": "object",
+    "required": [
+      "vct", "iss", "iat",
+      "given_name", "family_name", "document_number",
+      "profession", "profession_code",
+      "license_number", "issuing_body",
+      "license_status", "issue_date"
+    ],
+    "properties": {
+
+      "vct": {
+        "type": "string",
+        "const": "https://schemas.cdpi-poc.local/professional-license/v1"
+      },
+      "iss": { "type": "string" },
+      "iat": { "type": "integer" },
+      "exp": { "type": "integer" },
+
+      "given_name": {
+        "type": "string",
+        "description": "License holder's given name(s)",
+        "examples": ["Ana Lucía"]
+      },
+      "family_name": {
+        "type": "string",
+        "description": "License holder's family name(s)",
+        "examples": ["Mendoza Torres"]
+      },
+      "birthdate": {
+        "type": "string",
+        "format": "date",
+        "description": "Holder's date of birth (ISO 8601)"
+      },
+      "document_number": {
+        "type": "string",
+        "description": "National identity document number",
+        "examples": ["08-1990-00234"]
+      },
+      "nationality": {
+        "type": "string",
+        "description": "Holder nationality (ISO 3166-1 alpha-2)",
+        "examples": ["CR"]
+      },
+
+      "profession": {
+        "type": "string",
+        "description": "Name of the regulated profession",
+        "examples": ["Médico y Cirujano", "Abogado y Notario", "Ingeniero Civil", "Contador Público"]
+      },
+      "profession_code": {
+        "type": "string",
+        "description": "Official profession classification code (ISCO-08 or national equivalent)",
+        "examples": ["ISCO-2211", "ISCO-2611"]
+      },
+      "specialty": {
+        "type": "string",
+        "description": "Professional specialty or sub-discipline (if applicable)",
+        "examples": ["Cardiología Pediátrica", "Derecho Laboral"]
+      },
+
+      "license_number": {
+        "type": "string",
+        "description": "Official license registration number",
+        "examples": ["CCSS-MED-2019-04521"]
+      },
+      "issuing_body": {
+        "type": "string",
+        "description": "Name of the licensing authority",
+        "examples": ["Colegio de Médicos y Cirujanos de Costa Rica"]
+      },
+      "issuing_body_id": {
+        "type": "string",
+        "description": "Official identifier of the licensing authority"
+      },
+      "license_status": {
+        "type": "string",
+        "enum": ["active", "suspended", "revoked", "expired", "inactive"],
+        "description": "Current status of the professional license"
+      },
+      "issue_date": {
+        "type": "string",
+        "format": "date",
+        "description": "Date the license was issued (ISO 8601)",
+        "examples": ["2019-09-15"]
+      },
+      "expiry_date": {
+        "type": "string",
+        "format": "date",
+        "description": "License expiration date (ISO 8601) — if applicable",
+        "examples": ["2025-09-14"]
+      },
+      "last_renewal_date": {
+        "type": "string",
+        "format": "date",
+        "description": "Date of last license renewal"
+      },
+      "practice_country": {
+        "type": "string",
+        "description": "Country where the license is valid (ISO 3166-1 alpha-2)",
+        "examples": ["CR"]
+      },
+      "practice_regions": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Specific regions or jurisdictions where the license is valid (if restricted)",
+        "examples": [["San José", "Heredia"]]
+      },
+      "sanctions_or_restrictions": {
+        "type": "string",
+        "description": "Any active sanctions or practice restrictions — sensitive",
+        "examples": ["None", "Restricted to supervised practice"]
+      },
+      "qualification_basis": {
+        "type": "string",
+        "description": "Underlying qualification that supports the license",
+        "examples": ["Universidad de Costa Rica — Médico y Cirujano, 2018"]
+      }
+    }
+  },
+
+  "vct_type_metadata": {
+    "vct": "https://schemas.cdpi-poc.local/professional-license/v1",
+    "name": "Professional License",
+    "description": "Authorization to practice a regulated profession.",
+    "display": [
+      {
+        "lang": "en",
+        "name": "Professional License",
+        "description": "Issued by the official professional licensing body",
+        "background_color": "#3C3489",
+        "text_color": "#FFFFFF"
+      },
+      {
+        "lang": "es",
+        "name": "Licencia Profesional",
+        "description": "Emitida por el colegio o autoridad reguladora competente",
+        "background_color": "#3C3489",
+        "text_color": "#FFFFFF"
+      }
+    ],
+    "claims": [
+      { "path": ["given_name"],               "display": [{ "lang": "en", "label": "Given Name" },               { "lang": "es", "label": "Nombre(s)" }] },
+      { "path": ["family_name"],              "display": [{ "lang": "en", "label": "Family Name" },              { "lang": "es", "label": "Apellido(s)" }] },
+      { "path": ["document_number"],          "display": [{ "lang": "en", "label": "Document Number" },          { "lang": "es", "label": "Número de Documento" }] },
+      { "path": ["profession"],               "display": [{ "lang": "en", "label": "Profession" },               { "lang": "es", "label": "Profesión" }] },
+      { "path": ["specialty"],                "display": [{ "lang": "en", "label": "Specialty" },                { "lang": "es", "label": "Especialidad" }] },
+      { "path": ["license_number"],           "display": [{ "lang": "en", "label": "License Number" },           { "lang": "es", "label": "Número de Licencia" }] },
+      { "path": ["issuing_body"],             "display": [{ "lang": "en", "label": "Issuing Body" },             { "lang": "es", "label": "Entidad Emisora" }] },
+      { "path": ["license_status"],           "display": [{ "lang": "en", "label": "License Status" },           { "lang": "es", "label": "Estado de Licencia" }] },
+      { "path": ["issue_date"],               "display": [{ "lang": "en", "label": "Issue Date" },               { "lang": "es", "label": "Fecha de Emisión" }] },
+      { "path": ["expiry_date"],              "display": [{ "lang": "en", "label": "Expiry Date" },              { "lang": "es", "label": "Fecha de Vencimiento" }] },
+      { "path": ["practice_country"],         "display": [{ "lang": "en", "label": "Valid In" },                 { "lang": "es", "label": "Válida En" }] },
+      { "path": ["sanctions_or_restrictions"],"display": [{ "lang": "en", "label": "Restrictions" },             { "lang": "es", "label": "Restricciones" }] }
+    ]
+  },
+
+  "disclosure_frame": {
+    "_sd": [
+      "birthdate",
+      "document_number",
+      "nationality",
+      "profession_code",
+      "issuing_body_id",
+      "last_renewal_date",
+      "practice_regions",
+      "sanctions_or_restrictions",
+      "qualification_basis"
+    ],
+    "_always_revealed": [
+      "given_name",
+      "family_name",
+      "profession",
+      "specialty",
+      "license_number",
+      "issuing_body",
+      "license_status",
+      "issue_date",
+      "expiry_date",
+      "practice_country"
+    ],
+    "_rationale": {
+      "always_revealed": "Name, profession, license number, status, issuing body, and validity dates are required for any professional verification — these are the minimum a verifier needs.",
+      "selectively_disclosable": "Document number, sanctions, internal codes, and qualification basis are sensitive or only needed for specific high-trust verifications (e.g., hospital hiring vs. basic identity check)."
+    }
+  },
+
+  "sample_credential_data": {
+    "given_name": "Ana Lucía",
+    "family_name": "Mendoza Torres",
+    "birthdate": "1990-04-07",
+    "document_number": "1-0890-0234",
+    "nationality": "CR",
+    "profession": "Médico y Cirujano",
+    "profession_code": "ISCO-2211",
+    "specialty": "Medicina General",
+    "license_number": "MED-2019-04521",
+    "issuing_body": "Colegio de Médicos y Cirujanos de Costa Rica",
+    "issuing_body_id": "CMCCR-001",
+    "license_status": "active",
+    "issue_date": "2019-09-15",
+    "expiry_date": "2025-09-14",
+    "last_renewal_date": "2023-09-10",
+    "practice_country": "CR",
+    "practice_regions": [],
+    "sanctions_or_restrictions": "None",
+    "qualification_basis": "Universidad de Costa Rica — Médico y Cirujano, 2018"
+  },
+
+  "credebl_api_payload": {
+    "name": "ProfessionalLicense",
+    "version": "1.0",
+    "schemaType": "SD_JWT_VC",
+    "vct": "https://schemas.cdpi-poc.local/professional-license/v1",
+    "attributes": [
+      "given_name", "family_name", "birthdate", "document_number", "nationality",
+      "profession", "profession_code", "specialty",
+      "license_number", "issuing_body", "issuing_body_id",
+      "license_status", "issue_date", "expiry_date", "last_renewal_date",
+      "practice_country", "practice_regions", "sanctions_or_restrictions", "qualification_basis"
+    ]
+  }
+}

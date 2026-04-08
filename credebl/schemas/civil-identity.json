@@ -1,0 +1,300 @@
+{
+  "_comment": "=================================================================",
+  "_comment2": "CDPI PoC — Civil Identity Attribute Credential",
+  "_comment3": "Format: SD-JWT VC (draft-ietf-oauth-sd-jwt-vc)",
+  "_comment4": "Use case: Portable identity attributes from civil registry",
+  "_comment5": "Issuer: Civil registry / National ID authority (e.g. JCE, RENIEC, TSE)",
+  "_comment6": "Typical verifiers: Banks (KYC), government services, telecoms, employers",
+  "_comment7": "Note: This is the most privacy-sensitive schema — most fields SD",
+  "_comment8": "=================================================================",
+
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://schemas.cdpi-poc.local/civil-identity/v1",
+    "title": "Civil Identity Attribute Credential",
+    "description": "Selective disclosure credential containing civil registry identity attributes. Designed for privacy-preserving identity verification across government and private services.",
+    "type": "object",
+    "required": [
+      "vct", "iss", "iat",
+      "given_name", "family_name",
+      "document_number", "document_type",
+      "nationality", "birthdate",
+      "credential_status"
+    ],
+    "properties": {
+
+      "vct": {
+        "type": "string",
+        "const": "https://schemas.cdpi-poc.local/civil-identity/v1"
+      },
+      "iss": { "type": "string" },
+      "iat": { "type": "integer" },
+      "exp": { "type": "integer" },
+
+      "given_name": {
+        "type": "string",
+        "description": "Full given name(s) as registered in civil registry",
+        "examples": ["Luis Fernando"]
+      },
+      "family_name": {
+        "type": "string",
+        "description": "Full family name(s) as registered in civil registry",
+        "examples": ["Castillo Vega"]
+      },
+      "full_name": {
+        "type": "string",
+        "description": "Complete name as a single string (for display purposes)",
+        "examples": ["Luis Fernando Castillo Vega"]
+      },
+
+      "document_number": {
+        "type": "string",
+        "description": "National identity document number",
+        "examples": ["001-0190045-6"]
+      },
+      "document_type": {
+        "type": "string",
+        "enum": ["national_id", "passport", "residence_permit", "foreign_id"],
+        "description": "Type of identity document"
+      },
+      "document_expiry": {
+        "type": "string",
+        "format": "date",
+        "description": "Expiry date of the physical identity document"
+      },
+
+      "birthdate": {
+        "type": "string",
+        "format": "date",
+        "description": "Date of birth (ISO 8601)",
+        "examples": ["1990-01-19"]
+      },
+      "birthplace": {
+        "type": "string",
+        "description": "Municipality and province/state of birth",
+        "examples": ["Santo Domingo, Distrito Nacional"]
+      },
+      "birth_country": {
+        "type": "string",
+        "description": "Country of birth (ISO 3166-1 alpha-2)",
+        "examples": ["DO"]
+      },
+
+      "nationality": {
+        "type": "string",
+        "description": "Nationality (ISO 3166-1 alpha-2)",
+        "examples": ["DO"]
+      },
+      "gender": {
+        "type": "string",
+        "enum": ["male", "female", "non_binary", "not_disclosed"],
+        "description": "Gender as registered in civil registry"
+      },
+
+      "age_over_18": {
+        "type": "boolean",
+        "description": "True if the holder is 18 years or older — privacy-preserving age check without revealing birthdate"
+      },
+      "age_over_21": {
+        "type": "boolean",
+        "description": "True if the holder is 21 years or older"
+      },
+      "age_over_65": {
+        "type": "boolean",
+        "description": "True if the holder is 65 years or older"
+      },
+
+      "address_street": {
+        "type": "string",
+        "description": "Street address",
+        "examples": ["Av. 27 de Febrero #123"]
+      },
+      "address_municipality": {
+        "type": "string",
+        "description": "Municipality or district",
+        "examples": ["Santo Domingo Este"]
+      },
+      "address_province": {
+        "type": "string",
+        "description": "Province, state, or department",
+        "examples": ["Santo Domingo"]
+      },
+      "address_country": {
+        "type": "string",
+        "description": "Country of residence (ISO 3166-1 alpha-2)",
+        "examples": ["DO"]
+      },
+      "address_postal_code": {
+        "type": "string",
+        "description": "Postal or ZIP code",
+        "examples": ["11604"]
+      },
+
+      "phone_number": {
+        "type": "string",
+        "description": "Primary phone number (E.164 format)",
+        "examples": ["+18095551234"]
+      },
+      "email": {
+        "type": "string",
+        "format": "email",
+        "description": "Email address registered with the authority"
+      },
+
+      "marital_status": {
+        "type": "string",
+        "enum": ["single", "married", "divorced", "widowed", "civil_union", "separated"],
+        "description": "Civil marital status"
+      },
+
+      "tax_id": {
+        "type": "string",
+        "description": "Tax identification number (RNC, CUIT, RFC, etc.)",
+        "examples": ["001-0190045-6"]
+      },
+
+      "credential_status": {
+        "type": "string",
+        "enum": ["active", "revoked", "suspended"],
+        "description": "Status of this identity credential"
+      },
+      "issuing_authority": {
+        "type": "string",
+        "description": "Full name of the issuing civil registry authority",
+        "examples": ["Junta Central Electoral — República Dominicana"]
+      },
+      "registry_entry_number": {
+        "type": "string",
+        "description": "Civil registry entry number",
+        "examples": ["0001-190045-2"]
+      }
+    }
+  },
+
+  "vct_type_metadata": {
+    "vct": "https://schemas.cdpi-poc.local/civil-identity/v1",
+    "name": "Civil Identity Credential",
+    "description": "Identity attributes from the national civil registry.",
+    "display": [
+      {
+        "lang": "en",
+        "name": "Civil Identity",
+        "description": "Issued by the national civil registry authority",
+        "background_color": "#854F0B",
+        "text_color": "#FFFFFF"
+      },
+      {
+        "lang": "es",
+        "name": "Identidad Civil",
+        "description": "Emitida por el registro civil nacional",
+        "background_color": "#854F0B",
+        "text_color": "#FFFFFF"
+      }
+    ],
+    "claims": [
+      { "path": ["given_name"],           "display": [{ "lang": "en", "label": "Given Name" },           { "lang": "es", "label": "Nombre(s)" }] },
+      { "path": ["family_name"],          "display": [{ "lang": "en", "label": "Family Name" },          { "lang": "es", "label": "Apellido(s)" }] },
+      { "path": ["document_number"],      "display": [{ "lang": "en", "label": "Document Number" },      { "lang": "es", "label": "Número de Cédula" }] },
+      { "path": ["document_type"],        "display": [{ "lang": "en", "label": "Document Type" },        { "lang": "es", "label": "Tipo de Documento" }] },
+      { "path": ["birthdate"],            "display": [{ "lang": "en", "label": "Date of Birth" },        { "lang": "es", "label": "Fecha de Nacimiento" }] },
+      { "path": ["nationality"],          "display": [{ "lang": "en", "label": "Nationality" },          { "lang": "es", "label": "Nacionalidad" }] },
+      { "path": ["gender"],               "display": [{ "lang": "en", "label": "Gender" },               { "lang": "es", "label": "Sexo" }] },
+      { "path": ["age_over_18"],          "display": [{ "lang": "en", "label": "Age 18+" },              { "lang": "es", "label": "Mayor de 18" }] },
+      { "path": ["age_over_21"],          "display": [{ "lang": "en", "label": "Age 21+" },              { "lang": "es", "label": "Mayor de 21" }] },
+      { "path": ["address_municipality"], "display": [{ "lang": "en", "label": "Municipality" },         { "lang": "es", "label": "Municipio" }] },
+      { "path": ["address_province"],     "display": [{ "lang": "en", "label": "Province" },             { "lang": "es", "label": "Provincia" }] },
+      { "path": ["address_country"],      "display": [{ "lang": "en", "label": "Country" },              { "lang": "es", "label": "País" }] },
+      { "path": ["marital_status"],       "display": [{ "lang": "en", "label": "Marital Status" },       { "lang": "es", "label": "Estado Civil" }] },
+      { "path": ["tax_id"],               "display": [{ "lang": "en", "label": "Tax ID" },               { "lang": "es", "label": "RNC / CUIT / RFC" }] },
+      { "path": ["credential_status"],    "display": [{ "lang": "en", "label": "Status" },               { "lang": "es", "label": "Estado" }] },
+      { "path": ["issuing_authority"],    "display": [{ "lang": "en", "label": "Issuing Authority" },    { "lang": "es", "label": "Autoridad Emisora" }] }
+    ]
+  },
+
+  "disclosure_frame": {
+    "_comment": "Civil identity is the most privacy-sensitive schema.",
+    "_comment2": "Almost all personal data is SD — holder controls what they reveal per context.",
+    "_sd": [
+      "full_name",
+      "document_expiry",
+      "birthdate",
+      "birthplace",
+      "birth_country",
+      "gender",
+      "age_over_18",
+      "age_over_21",
+      "age_over_65",
+      "address_street",
+      "address_municipality",
+      "address_province",
+      "address_country",
+      "address_postal_code",
+      "phone_number",
+      "email",
+      "marital_status",
+      "tax_id",
+      "registry_entry_number"
+    ],
+    "_always_revealed": [
+      "given_name",
+      "family_name",
+      "document_number",
+      "document_type",
+      "nationality",
+      "credential_status",
+      "issuing_authority"
+    ],
+    "_rationale": {
+      "always_revealed": "Name, document number, document type, nationality, and status are the absolute minimum for identity verification — revealing these alone doesn't enable profiling or address-based discrimination.",
+      "selectively_disclosable": "Everything else is sensitive. Birthdate enables age calculation. Address enables physical targeting. Gender, marital status, and tax ID are sensitive in many Latin American contexts. Age flags (age_over_18, etc.) allow privacy-preserving age checks without revealing exact birthdate.",
+      "privacy_note": "For services that only need age verification (e.g., alcohol purchase, voting), the holder can present only age_over_18=true without revealing their actual birthdate."
+    }
+  },
+
+  "sample_credential_data": {
+    "given_name": "Luis Fernando",
+    "family_name": "Castillo Vega",
+    "full_name": "Luis Fernando Castillo Vega",
+    "document_number": "001-0190045-6",
+    "document_type": "national_id",
+    "document_expiry": "2029-01-19",
+    "birthdate": "1990-01-19",
+    "birthplace": "Santo Domingo, Distrito Nacional",
+    "birth_country": "DO",
+    "nationality": "DO",
+    "gender": "male",
+    "age_over_18": true,
+    "age_over_21": true,
+    "age_over_65": false,
+    "address_street": "Av. 27 de Febrero #123, Apto 4B",
+    "address_municipality": "Santo Domingo Este",
+    "address_province": "Santo Domingo",
+    "address_country": "DO",
+    "address_postal_code": "11604",
+    "phone_number": "+18095551234",
+    "email": "luis.castillo@example.com",
+    "marital_status": "single",
+    "tax_id": "001-0190045-6",
+    "credential_status": "active",
+    "issuing_authority": "Junta Central Electoral — República Dominicana",
+    "registry_entry_number": "0001-190045-2"
+  },
+
+  "credebl_api_payload": {
+    "name": "CivilIdentity",
+    "version": "1.0",
+    "schemaType": "SD_JWT_VC",
+    "vct": "https://schemas.cdpi-poc.local/civil-identity/v1",
+    "attributes": [
+      "given_name", "family_name", "full_name",
+      "document_number", "document_type", "document_expiry",
+      "birthdate", "birthplace", "birth_country",
+      "nationality", "gender",
+      "age_over_18", "age_over_21", "age_over_65",
+      "address_street", "address_municipality", "address_province", "address_country", "address_postal_code",
+      "phone_number", "email",
+      "marital_status", "tax_id",
+      "credential_status", "issuing_authority", "registry_entry_number"
+    ]
+  }
+}
