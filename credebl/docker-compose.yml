@@ -240,7 +240,10 @@ services:
     container_name: credebl-seed
     restart: "no"
     command: >
-      sh -c 'npx prisma migrate deploy --schema=./libs/prisma-service/prisma/schema.prisma && npx ts-node ./libs/prisma-service/prisma/seed.ts'
+      sh -c 'mkdir -p /app/prisma/data &&
+      ln -sfn /app/libs/prisma-service/prisma/data/geo-location-master-data /app/prisma/data/geo-location-master-data &&
+      npx prisma migrate deploy --schema=./libs/prisma-service/prisma/schema.prisma &&
+      npx ts-node ./libs/prisma-service/prisma/seed.ts'
     env_file: .env
     volumes:
       - ./config/credebl-master-table.json:/app/prisma/data/credebl-master-table/credebl-master-table.json:ro
