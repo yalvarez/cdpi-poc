@@ -63,6 +63,14 @@ sed -i "s/YOUR_VPS_IP/$VPS_IP/g" .env
 echo "Updated .env with VPS IP: $VPS_IP"
 ```
 
+Keep both database variables present in `.env`:
+```env
+DATABASE_URL=postgresql://credebl:${POSTGRES_PASSWORD}@postgres:5432/credebl
+POOL_DATABASE_URL=postgresql://credebl:${POSTGRES_PASSWORD}@postgres:5432/credebl
+```
+
+> The `seed` container's Prisma setup expects `POOL_DATABASE_URL`. If it is missing, `seed` exits with `Environment variable not found: POOL_DATABASE_URL`.
+
 ### 3. Pull all images
 
 ```bash
@@ -152,7 +160,7 @@ docker compose logs -f api-gateway
 ```
 
 The full stack takes 3-5 minutes to be fully ready.  
-The `seed` container will run and exit — that is normal.
+The `seed` container will run Prisma migrations, seed the database, and then exit — that is normal.
 
 ### 9. Verify deployment
 

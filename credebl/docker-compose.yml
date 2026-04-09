@@ -118,6 +118,7 @@ services:
       KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL}
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
     volumes:
       - ./config/keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro
@@ -127,11 +128,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080; printf \"GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; grep -q \"200 OK\" <&3'"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000; printf \"GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; grep -q \"200 OK\" <&3'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
     networks:
       - credebl-net
     deploy:
@@ -238,9 +239,11 @@ services:
     image: ghcr.io/credebl/seed:latest
     container_name: credebl-seed
     restart: "no"
+    command: >
+      sh -c 'npx prisma migrate deploy --schema=./libs/prisma-service/prisma/schema.prisma && npx ts-node ./libs/prisma-service/prisma/seed.ts'
     env_file: .env
     volumes:
-      - ./config/credebl-master-table.json:/app/libs/prisma-service/prisma/data/credebl-master-table.json:ro
+      - ./config/credebl-master-table.json:/app/prisma/data/credebl-master-table/credebl-master-table.json:ro
     depends_on:
       postgres:
         condition: service_healthy
