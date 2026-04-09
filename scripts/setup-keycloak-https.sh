@@ -338,7 +338,9 @@ issue_certificate() {
 verify_proxy_setup() {
   local local_status=""
   local public_url=""
+  local public_headers=""
   local public_status=""
+  local redirect_location=""
 
   local_status=$(curl -k -o /dev/null -s -w '%{http_code}' "http://127.0.0.1:${KEYCLOAK_PORT}/admin/" || true)
 
@@ -348,9 +350,18 @@ verify_proxy_setup() {
     public_url="http://${DOMAIN}/admin/"
   fi
 
-  public_status=$(curl -k -o /dev/null -s -w '%{http_code}' "$public_url" || true)
+  public_headers=$(curl -k -I -s "$public_url" || true)
+  public_status=$(printf '%s\n' "$public_headers" | awk 'toupper($1) ~ /^HTTP\// {code=$2} END {print code}')
+  redirect_location=$(printf '%s\n' "$public_headers" | awk 'BEGIN{IGNORECASE=1} /^Location:/ {print $2}' | tr -d '\r')
 
   log "Verification: local Keycloak /admin -> HTTP ${local_status}; public ${public_url} -> HTTP ${public_status}"
+
+  if [[ -n "$redirect_location" ]]; then
+    log "Public redirect location: ${redirect_location}"
+    if [[ "$redirect_location" == http://* ]]; then
+      warn "Keycloak is still advertising an HTTP redirect. Recreate the container so the updated KC_HOSTNAME/KEYCLOAK_PUBLIC_URL values take effect."
+    fi
+  fi
 
   case "$public_status" in
     200|301|302|303)
@@ -387,11 +398,10 @@ restart_keycloak() {
     return
   fi
 
-  log "Restarting Keycloak to pick up proxy-related settings..."
+  log "Recreating Keycloak so the updated hostname/proxy settings take effect..."
   (
     cd "$CREDEBL_DIR"
-    docker compose up -d keycloak
-    docker compose restart keycloak
+    docker compose up -d --force-recreate keycloak
   )
 }
 
