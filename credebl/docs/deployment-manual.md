@@ -13,7 +13,7 @@ Your VPS must have:
 - Ubuntu 22.04 or 24.04 LTS
 - 4 CPU cores, 8GB RAM, 150GB disk
 - Docker Engine (installed by setup-vps.sh)
-- Ports open: 22, 5000, 8080, 9001, 8025, 4000
+- Ports open: 22, 80, 443, 5000, 8080, 9001, 8025, 4000
 
 If the VPS is fresh, run the setup script first:
 
@@ -119,13 +119,32 @@ docker compose logs -f keycloak
 
 Wait until you see: `Keycloak X.X.X on JVM ... started`
 
-### 7. Start all CREDEBL services
+### 7. Optional — enable HTTPS for Keycloak
+
+If you have a real domain pointing to the VPS (for example `auth.example.org`), you can automate Nginx + Let's Encrypt setup with:
+
+```bash
+sudo bash scripts/setup-keycloak-https.sh \
+  --domain auth.example.org \
+  --email admin@example.org
+```
+
+This script will:
+- install `nginx`, `certbot`, and the Nginx Certbot plugin
+- open ports `80` and `443`
+- create an Nginx reverse proxy to the local Keycloak container
+- request a Let's Encrypt certificate
+- update `credebl/.env` so `KEYCLOAK_PUBLIC_URL` uses `https://...`
+
+> Note: Let's Encrypt requires a real domain name. It does not issue certificates for a raw public IP.
+
+### 8. Start all CREDEBL services
 
 ```bash
 docker compose up -d
 ```
 
-### 8. Watch startup progress
+### 9. Watch startup progress
 
 ```bash
 docker compose ps

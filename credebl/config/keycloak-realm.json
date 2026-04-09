@@ -24,8 +24,9 @@
       "protocol": "openid-connect",
       "redirectUris": [
         "http://localhost:5000/*",
+        "http://127.0.0.1:5000/*",
         "http://localhost:3000/*",
-        "${API_ENDPOINT}/*"
+        "http://127.0.0.1:3000/*"
       ],
       "webOrigins": ["*"],
       "defaultClientScopes": [
@@ -52,7 +53,8 @@
       "redirectUris": [
         "inji://callback",
         "openid://callback",
-        "http://localhost:*"
+        "http://localhost/*",
+        "http://127.0.0.1/*"
       ],
       "webOrigins": ["*"]
     }
