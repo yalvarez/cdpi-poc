@@ -239,6 +239,7 @@ services:
     image: ghcr.io/credebl/seed:latest
     container_name: credebl-seed
     restart: "no"
+    user: "0:0"
     command: >
       sh -c 'mkdir -p /app/prisma/data &&
       ln -sfn /app/libs/prisma-service/prisma/data/geo-location-master-data /app/prisma/data/geo-location-master-data &&
