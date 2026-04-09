@@ -92,7 +92,7 @@ sudo bash scripts/setup-vps.sh
 ```bash
 cd credebl
 cp .env.example .env && nano .env
-VPS_IP=$(curl -s ifconfig.me) && sed -i "s/YOUR_VPS_IP/$VPS_IP/g" .env
+VPS_IP=$(curl -s ifconfig.me) && sed -i "s/YOUR_VPS_IP/$VPS_IP/g" .env credebl/config/credebl-master-table.json
 docker compose pull && docker compose up -d
 bash ../scripts/health-check.sh
 ```

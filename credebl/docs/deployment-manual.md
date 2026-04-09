@@ -60,6 +60,9 @@ PLATFORM_SEED=<run: openssl rand -hex 16>
 JWT_SECRET=<run: openssl rand -hex 32>
 PLATFORM_ADMIN_EMAIL=admin@cdpi-poc.local
 CRYPTO_PRIVATE_KEY=cdpi-poc-crypto-key-change-me
+NATS_AUTH_TYPE=none
+ELK_LOG=false
+APP_PROTOCOL=http
 ```
 
 Also replace `YOUR_VPS_IP` with your actual VPS IP address in both `.env` and the seed data file:
