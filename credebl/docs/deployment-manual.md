@@ -51,25 +51,31 @@ POSTGRES_PASSWORD=<strong-password>
 REDIS_PASSWORD=<strong-password>
 KEYCLOAK_ADMIN_PASSWORD=<strong-password>
 KEYCLOAK_CLIENT_SECRET=<run: openssl rand -hex 32>
+KEYCLOAK_MANAGEMENT_CLIENT_SECRET=<copy KEYCLOAK_CLIENT_SECRET>
+PLATFORM_ADMIN_KEYCLOAK_SECRET=<copy KEYCLOAK_CLIENT_SECRET>
+# keep KEYCLOAK_MANAGEMENT_CLIENT_ID=adminClient
+# keep PLATFORM_ADMIN_KEYCLOAK_ID=adminClient
 MINIO_ROOT_PASSWORD=<strong-password>
 PLATFORM_SEED=<run: openssl rand -hex 16>
 JWT_SECRET=<run: openssl rand -hex 32>
+PLATFORM_ADMIN_EMAIL=admin@cdpi-poc.local
+CRYPTO_PRIVATE_KEY=cdpi-poc-crypto-key-change-me
 ```
 
-Also replace `YOUR_VPS_IP` with your actual VPS IP address:
+Also replace `YOUR_VPS_IP` with your actual VPS IP address in both `.env` and the seed data file:
 ```bash
 VPS_IP=$(curl -s ifconfig.me)
-sed -i "s/YOUR_VPS_IP/$VPS_IP/g" .env
-echo "Updated .env with VPS IP: $VPS_IP"
+sed -i "s/YOUR_VPS_IP/$VPS_IP/g" .env config/credebl-master-table.json
+echo "Updated .env and credebl-master-table.json with VPS IP: $VPS_IP"
 ```
 
-Keep both database variables present in `.env`:
+Keep both database variables present in `.env` using the full URL-encoded password:
 ```env
-DATABASE_URL=postgresql://credebl:${POSTGRES_PASSWORD}@postgres:5432/credebl
-POOL_DATABASE_URL=postgresql://credebl:${POSTGRES_PASSWORD}@postgres:5432/credebl
+DATABASE_URL=postgresql://credebl:REPLACE_WITH_URLENCODED_PASSWORD@postgres:5432/credebl
+POOL_DATABASE_URL=postgresql://credebl:REPLACE_WITH_URLENCODED_PASSWORD@postgres:5432/credebl
 ```
 
-> The `seed` container's Prisma setup expects `POOL_DATABASE_URL`. If it is missing, `seed` exits with `Environment variable not found: POOL_DATABASE_URL`.
+> The `seed` container's Prisma setup expects `POOL_DATABASE_URL`, and Docker does not expand `${POSTGRES_PASSWORD}` inside `env_file` values. If the password contains `@`, `:`, or `/`, URL-encode it first (for example `@` → `%40`).
 
 ### 3. Pull all images
 

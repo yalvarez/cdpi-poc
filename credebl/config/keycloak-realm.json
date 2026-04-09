@@ -43,6 +43,24 @@
       ]
     },
     {
+      "clientId": "adminClient",
+      "name": "CREDEBL Platform Admin Client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles"
+      ]
+    },
+    {
       "clientId": "credebl-wallet-client",
       "name": "CREDEBL Wallet Client (public)",
       "enabled": true,
@@ -84,6 +102,18 @@
         }
       ],
       "realmRoles": ["platform-admin"]
+    },
+    {
+      "username": "service-account-adminClient",
+      "enabled": true,
+      "serviceAccountClientId": "adminClient",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "query-users",
+          "view-users"
+        ]
+      }
     }
   ]
 }

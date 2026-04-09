@@ -1,97 +1,193 @@
 {
-  "_comment": "=================================================================",
-  "_comment2": "CDPI PoC — CREDEBL Master Table (Seed Data)",
-  "_comment3": "-----------------------------------------------------------------",
-  "_comment4": "This file seeds the CREDEBL database with the minimum reference",
-  "_comment5": "data required for the platform to function.",
-  "_comment6": "",
-  "_comment7": "Original source: github.com/credebl/install",
-  "_comment8": "  local-deployment/libs/prisma-service/prisma/data/",
-  "_comment9": "  credebl-master-table.json",
-  "_comment10": "",
-  "_comment11": "This PoC version contains only the data needed for SD-JWT VC",
-  "_comment12": "issuance on BCovrin Testnet. For AnonCreds on other networks,",
-  "_comment13": "add entries to the ledgers array following the same structure.",
-  "_comment14": "=================================================================",
-
-  "ledgers": [
+  "platformConfigData": {
+    "externalIp": "http://YOUR_VPS_IP",
+    "inboundEndpoint": "http://YOUR_VPS_IP",
+    "username": "credebl",
+    "sgApiKey": "mailpit-mock",
+    "emailFrom": "noreply@cdpi-poc.local",
+    "apiEndpoint": "http://YOUR_VPS_IP:5000",
+    "tailsFileServer": "https://tails.vonx.io"
+  },
+  "platformAdminData": {
+    "firstName": "Platform",
+    "lastName": "Admin",
+    "email": "admin@cdpi-poc.local",
+    "username": "admin@cdpi-poc.local",
+    "password": "U2FsdGVkX1+WXl37vU7M6f58VHvclNFUsK08R8VHMTY=",
+    "verificationCode": "",
+    "isEmailVerified": true,
+    "supabaseUserId": "96cef763-e106-46c1-ac78-fadf2803b11f"
+  },
+  "platformAdminOrganizationData": {
+    "name": "Platform-admin",
+    "description": "Platform-admin",
+    "logoUrl": "",
+    "website": "",
+    "createdBy": "",
+    "lastChangedBy": ""
+  },
+  "platformAdminKeycloakPassword": "changeme",
+  "orgRoleData": [
     {
-      "id": "b0cf29f0-3a7d-48ea-9075-39ea8f2f0b14",
-      "name": "BCovrin Test Network",
+      "name": "owner",
+      "description": "Organization Owner"
+    },
+    {
+      "name": "admin",
+      "description": "Organization Admin"
+    },
+    {
+      "name": "issuer",
+      "description": "Organization Credential Issuer"
+    },
+    {
+      "name": "verifier",
+      "description": "Organization Credential Verifier"
+    },
+    {
+      "name": "holder",
+      "description": "Receives credentials issued by organization"
+    },
+    {
+      "name": "member",
+      "description": "Joins the organization as member"
+    },
+    {
+      "name": "platform_admin",
+      "description": "Platform administrator"
+    }
+  ],
+  "agentTypeData": [
+    {
+      "agent": "AFJ"
+    },
+    {
+      "agent": "ACAPY"
+    }
+  ],
+  "orgAgentTypeData": [
+    {
+      "agent": "DEDICATED"
+    },
+    {
+      "agent": "SHARED"
+    }
+  ],
+  "ledgerData": [
+    {
+      "name": "Bcovrin Testnet",
       "networkType": "testnet",
-      "networkString": "bcovrin:test",
-      "indyNamespace": "bcovrin:test",
-      "genesisTransactions": "http://test.bcovrin.vonx.io/genesis",
+      "poolConfig": "https://raw.githubusercontent.com/bcgov/von-network/main/BCovrin/genesis_test",
       "isActive": true,
-      "isDefault": true,
-      "poolConfig": null,
-      "isProduction": false,
-      "registerDIDEndpoint": "http://test.bcovrin.vonx.io/register",
-      "registerDIDOptions": {
-        "method": "POST",
-        "body": {
-          "role": "ENDORSER",
-          "alias": null
+      "networkString": "testnet",
+      "nymTxnEndpoint": "http://test.bcovrin.vonx.io/register",
+      "indyNamespace": "bcovrin:testnet"
+    },
+    {
+      "name": "Indicio Testnet",
+      "networkType": "testnet",
+      "poolConfig": "https://raw.githubusercontent.com/Indicio-tech/indicio-network/main/genesis_files/pool_transactions_testnet_genesis",
+      "isActive": true,
+      "networkString": "testnet",
+      "nymTxnEndpoint": "https://selfserve.indiciotech.io/nym",
+      "indyNamespace": "indicio:testnet"
+    },
+    {
+      "name": "Indicio Demonet",
+      "networkType": "demonet",
+      "poolConfig": "https://raw.githubusercontent.com/Indicio-tech/indicio-network/main/genesis_files/pool_transactions_demonet_genesis",
+      "isActive": true,
+      "networkString": "demonet",
+      "nymTxnEndpoint": "https://selfserve.indiciotech.io/nym",
+      "indyNamespace": "indicio:demonet"
+    },
+    {
+      "name": "Indicio Mainnet",
+      "networkType": "mainnet",
+      "poolConfig": "https://raw.githubusercontent.com/Indicio-tech/indicio-network/main/genesis_files/pool_transactions_mainnet_genesis",
+      "isActive": true,
+      "networkString": "mainnet",
+      "nymTxnEndpoint": "https://selfserve.indiciotech.io/nym",
+      "indyNamespace": "indicio:mainnet"
+    },
+    {
+      "name": "Polygon Testnet",
+      "networkType": "testnet",
+      "poolConfig": "",
+      "isActive": true,
+      "networkString": "testnet",
+      "nymTxnEndpoint": "",
+      "indyNamespace": "polygon:testnet"
+    },
+    {
+      "name": "Polygon Mainnet",
+      "networkType": "mainnet",
+      "poolConfig": "",
+      "isActive": true,
+      "networkString": "mainnet",
+      "nymTxnEndpoint": "",
+      "indyNamespace": "polygon:mainnet"
+    },
+    {
+      "name": "NA",
+      "networkType": "NA",
+      "poolConfig": "NA",
+      "isActive": true,
+      "networkString": "NA",
+      "nymTxnEndpoint": "NA",
+      "indyNamespace": "no_ledger"
+    }
+  ],
+  "ledgerConfig": [
+    {
+      "name": "indy",
+      "details": {
+        "did:indy": {
+          "bcovrin:testnet": "did:indy:bcovrin:testnet",
+          "indicio:demonet": "did:indy:indicio:demonet",
+          "indicio:mainnet": "did:indy:indicio:mainnet",
+          "indicio:testnet": "did:indy:indicio:testnet"
         }
       }
     },
     {
-      "id": "a8a9eaf1-a5b0-4df5-9e6c-2c3ae4d2a5b1",
-      "name": "Indicio Test Network",
-      "networkType": "testnet",
-      "networkString": "indicio:test",
-      "indyNamespace": "indicio:test",
-      "genesisTransactions": "https://raw.githubusercontent.com/Indicio-tech/indicio-network/main/genesis_files/pool_transactions_testnet_genesis",
-      "isActive": true,
-      "isDefault": false,
-      "poolConfig": null,
-      "isProduction": false,
-      "registerDIDEndpoint": "https://selfserve.indiciotech.io/nym",
-      "registerDIDOptions": {
-        "method": "POST",
-        "body": {
-          "network": "testnet"
+      "name": "polygon",
+      "details": {
+        "did:polygon": {
+          "mainnet": "did:polygon:mainnet",
+          "testnet": "did:polygon:testnet"
         }
+      }
+    },
+    {
+      "name": "noLedger",
+      "details": {
+        "did:key": "did:key",
+        "did:web": "did:web"
       }
     }
   ],
-
-  "org_agents_type": [
+  "userRoleData": [
     {
-      "id": "eff67cd9-0a32-48db-b947-24e3c9d4f11f",
-      "agent": "SHARED",
-      "createDateTime": "2024-01-01T00:00:00.000Z",
-      "lastChangedDateTime": "2024-01-01T00:00:00.000Z",
-      "deletedAt": null,
-      "isActive": true
+      "role": "HOLDER"
     },
     {
-      "id": "4b7e8d2a-52b3-41f2-b3d9-0d7a9f1c2e3b",
-      "agent": "DEDICATED",
-      "createDateTime": "2024-01-01T00:00:00.000Z",
-      "lastChangedDateTime": "2024-01-01T00:00:00.000Z",
-      "deletedAt": null,
-      "isActive": true
+      "role": "DEFAULT_USER"
     }
   ],
-
-  "client_config": [
+  "ecosystemRoleData": [
     {
-      "id": "c1d2e3f4-a5b6-7890-cdef-1234567890ab",
-      "clientId": "credebl-client",
-      "name": "CREDEBL Platform",
-      "tenantId": null,
-      "createDateTime": "2024-01-01T00:00:00.000Z",
-      "lastChangedDateTime": "2024-01-01T00:00:00.000Z",
-      "deletedAt": null,
-      "isActive": true
+      "name": "Ecosystem Lead",
+      "description": "Ecosystem Lead"
+    },
+    {
+      "name": "Ecosystem Member",
+      "description": "Ecosystem Member"
     }
   ],
-
   "_notes": {
-    "bcovrin_test": "BCovrin Test is a public permissioned Hyperledger Indy testnet operated by BC Gov. DIDs can be registered freely at http://test.bcovrin.vonx.io. This is the recommended network for PoC use.",
-    "indicio_test": "Indicio Test Network is included as a backup option. Self-service DID registration at https://selfserve.indiciotech.io.",
-    "sd_jwt_vc": "For SD-JWT VC format (this PoC's primary format), the ledger is used only for AnonCreds schema/cred-def registration. SD-JWT VCs do not require an Indy ledger — they use DID:web or DID:JWK for issuer key resolution. The ledger entries above are needed only if AnonCreds credentials are also being issued.",
-    "adding_networks": "To add more networks (e.g. Sovrin Staging, Candy Dev), copy the BCovrin entry and update id, name, networkString, indyNamespace, genesisTransactions, and registerDIDEndpoint. Generate a new UUID for the id field."
+    "seed_compatibility": "This file intentionally mirrors the upstream CREDEBL seed schema. Do not prune the top-level keys unless you also update the seed container code.",
+    "default_platform_login": "If you keep the default CRYPTO_PRIVATE_KEY from .env.example, the seeded platform admin login is admin@cdpi-poc.local / changeme.",
+    "public_host_placeholder": "Replace YOUR_VPS_IP with the real public IP or DNS name before first deploy so the seeded platform config and issuance links point to the correct host."
   }
 }

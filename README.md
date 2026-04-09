@@ -159,7 +159,7 @@ bash ../scripts/health-check-inji.sh
 
 ## Important — before first deploy
 
-**CREDEBL**: The `seed` service requires `credebl-master-table.json` — included in `credebl/config/`. Contains BCovrin Testnet + Indicio Testnet ledger configs. If CREDEBL's upstream version has additional fields, the seed may log warnings but will not fail.
+**CREDEBL**: The `seed` service requires the full upstream-style `credebl-master-table.json` in `credebl/config/`. Do not reduce it to only ledger rows or `org_agents_type` entries — the `credebl-seed` container also expects keys such as `orgRoleData`, `agentTypeData`, `platformAdminData`, and `ledgerConfig`.
 
 **INJI**: Always set `export DOCKER_DEFAULT_PLATFORM=linux/amd64` — images have no ARM64 build.  
 Run `generate-inji-certs.sh` before first deploy to create the required keystore.
@@ -180,4 +180,4 @@ Run `generate-inji-certs.sh` before first deploy to create the required keystore
 - [x] Keystore generation script
 - [ ] INJI — test flows
 - [ ] INJI — verification SDK
-- [ ] `credebl-master-table.json` (download from CREDEBL repo)
+- [x] `credebl-master-table.json` aligned with the upstream CREDEBL seed schema
