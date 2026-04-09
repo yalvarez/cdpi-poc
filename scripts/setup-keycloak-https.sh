@@ -149,6 +149,7 @@ install_packages() {
   apt-get install -y -qq \
     nginx \
     certbot \
+    python3 \
     python3-certbot-nginx \
     curl \
     ca-certificates \
@@ -387,6 +388,52 @@ update_credebl_env() {
   fi
 }
 
+normalize_utf8_file() {
+  local target_file="$1"
+
+  if [[ ! -f "$target_file" ]]; then
+    return
+  fi
+
+  require_command python3
+
+  python3 - "$target_file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+last_error = None
+for encoding in ("utf-8", "cp1252", "latin-1"):
+    try:
+        text = data.decode(encoding)
+        path.write_text(text, encoding="utf-8", newline="")
+        print(f"[INFO] Normalized {path} using {encoding} -> utf-8")
+        break
+    except UnicodeDecodeError as exc:
+        last_error = exc
+else:
+    raise SystemExit(f"[ERROR] Could not normalize {path} to UTF-8: {last_error}")
+PY
+}
+
+validate_compose_file() {
+  local compose_file="$CREDEBL_DIR/docker-compose.yml"
+
+  if [[ ! -f "$compose_file" ]]; then
+    return
+  fi
+
+  normalize_utf8_file "$compose_file"
+
+  if command -v docker >/dev/null 2>&1; then
+    (
+      cd "$CREDEBL_DIR"
+      docker compose config >/dev/null
+    ) || die "docker compose could not parse $compose_file even after UTF-8 normalization."
+  fi
+}
+
 restart_keycloak() {
   if [[ ! -f "$CREDEBL_DIR/docker-compose.yml" ]]; then
     warn "No docker-compose.yml found in $CREDEBL_DIR; skipping restart."
@@ -459,6 +506,7 @@ main() {
   issue_certificate
   write_nginx_https_config
   update_credebl_env
+  validate_compose_file
   restart_keycloak
   wait_for_keycloak
   verify_proxy_setup
