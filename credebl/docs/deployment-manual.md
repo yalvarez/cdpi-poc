@@ -125,6 +125,8 @@ docker compose run --rm minio-setup
 docker compose up -d keycloak
 ```
 
+The imported `credebl-realm` already includes the confidential `adminClient` used by the bootstrap flow, with the `realm-management` `realm-admin` role assigned to its service account. On a **fresh** server, no extra `kcadm.sh` commands are needed.
+
 Keycloak takes 60-90 seconds to start. Watch the logs:
 
 ```bash
@@ -167,6 +169,8 @@ docker compose logs -f api-gateway
 
 The full stack takes 3-5 minutes to be fully ready.  
 The `seed` container will run Prisma migrations, seed the database, and then exit — that is normal.
+
+> If you change `config/keycloak-realm.json` later, remember that Keycloak only imports the realm on first creation. Reusing an existing PostgreSQL/Keycloak state will keep the old realm config until you reset the stack data.
 
 ### 9. Verify deployment
 
