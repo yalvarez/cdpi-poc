@@ -32,6 +32,7 @@ EMAIL=""
 KEYCLOAK_PORT="8080"
 CREDEBL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../credebl" && pwd)"
 SKIP_CERTBOT=0
+CERTBOT_WEBROOT="/var/www/certbot"
 
 usage() {
   cat <<'EOF'
@@ -179,16 +180,121 @@ configure_firewall() {
   fi
 }
 
-write_nginx_config() {
-  local site_name="keycloak-${DOMAIN//./-}"
-  local conf_path="/etc/nginx/sites-available/${site_name}.conf"
+site_name() {
+  echo "keycloak-${DOMAIN//./-}"
+}
 
-  log "Writing Nginx site config: $conf_path"
-  cat > "$conf_path" <<EOF
+conf_path() {
+  echo "/etc/nginx/sites-available/$(site_name).conf"
+}
+
+cert_paths_exist() {
+  [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" && -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" ]]
+}
+
+reload_nginx() {
+  nginx -t
+  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^nginx.service'; then
+    systemctl enable nginx >/dev/null 2>&1 || true
+    systemctl reload nginx || systemctl restart nginx
+  elif command -v service >/dev/null 2>&1; then
+    service nginx reload || service nginx restart
+  else
+    nginx -s reload
+  fi
+}
+
+disable_conflicting_sites() {
+  local desired_conf
+  desired_conf="$(conf_path)"
+
+  log "Disabling default/conflicting Nginx sites for ${DOMAIN}"
+  rm -f /etc/nginx/sites-enabled/default
+
+  while IFS= read -r enabled_site; do
+    [[ -n "$enabled_site" ]] || continue
+    [[ "$enabled_site" == "$desired_conf" ]] && continue
+
+    if grep -Eq "server_name[[:space:]].*${DOMAIN}" "$enabled_site" 2>/dev/null; then
+      warn "Disabling conflicting Nginx site: $enabled_site"
+      rm -f "$enabled_site"
+    fi
+  done < <(find /etc/nginx/sites-enabled -maxdepth 1 \( -type l -o -type f \) 2>/dev/null)
+}
+
+write_nginx_http_config() {
+  local conf_path_value
+  conf_path_value="$(conf_path)"
+
+  mkdir -p "$CERTBOT_WEBROOT"
+
+  log "Writing HTTP Nginx site config: $conf_path_value"
+  cat > "$conf_path_value" <<EOF
 server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN};
+
+    client_max_body_size 25m;
+
+    location /.well-known/acme-challenge/ {
+        root ${CERTBOT_WEBROOT};
+        default_type "text/plain";
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:${KEYCLOAK_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port 80;
+        proxy_buffering off;
+    }
+}
+EOF
+
+  ln -sfn "$conf_path_value" "/etc/nginx/sites-enabled/$(site_name).conf"
+  reload_nginx
+}
+
+write_nginx_https_config() {
+  local conf_path_value
+  conf_path_value="$(conf_path)"
+
+  if ! cert_paths_exist; then
+    warn "TLS certificate files for ${DOMAIN} are not present yet; leaving the HTTP proxy config in place."
+    return
+  fi
+
+  log "Writing HTTPS Nginx site config: $conf_path_value"
+  cat > "$conf_path_value" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root ${CERTBOT_WEBROOT};
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     client_max_body_size 25m;
 
@@ -206,18 +312,8 @@ server {
 }
 EOF
 
-  ln -sfn "$conf_path" "/etc/nginx/sites-enabled/${site_name}.conf"
-  rm -f /etc/nginx/sites-enabled/default
-
-  nginx -t
-  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^nginx.service'; then
-    systemctl enable nginx >/dev/null 2>&1 || true
-    systemctl reload nginx || systemctl restart nginx
-  elif command -v service >/dev/null 2>&1; then
-    service nginx reload || service nginx restart
-  else
-    nginx -s reload
-  fi
+  ln -sfn "$conf_path_value" "/etc/nginx/sites-enabled/$(site_name).conf"
+  reload_nginx
 }
 
 issue_certificate() {
@@ -226,13 +322,43 @@ issue_certificate() {
     return
   fi
 
-  log "Requesting Let's Encrypt certificate for $DOMAIN"
-  certbot --nginx \
+  mkdir -p "$CERTBOT_WEBROOT"
+
+  log "Requesting Let's Encrypt certificate for $DOMAIN using the webroot method"
+  certbot certonly \
+    --webroot \
+    -w "$CERTBOT_WEBROOT" \
     --non-interactive \
     --agree-tos \
-    --redirect \
+    --keep-until-expiring \
     -m "$EMAIL" \
     -d "$DOMAIN"
+}
+
+verify_proxy_setup() {
+  local local_status=""
+  local public_url=""
+  local public_status=""
+
+  local_status=$(curl -k -o /dev/null -s -w '%{http_code}' "http://127.0.0.1:${KEYCLOAK_PORT}/admin/" || true)
+
+  if cert_paths_exist && [[ "$SKIP_CERTBOT" -eq 0 ]]; then
+    public_url="https://${DOMAIN}/admin/"
+  else
+    public_url="http://${DOMAIN}/admin/"
+  fi
+
+  public_status=$(curl -k -o /dev/null -s -w '%{http_code}' "$public_url" || true)
+
+  log "Verification: local Keycloak /admin -> HTTP ${local_status}; public ${public_url} -> HTTP ${public_status}"
+
+  case "$public_status" in
+    200|301|302|303)
+      ;;
+    *)
+      warn "Unexpected public response status ${public_status}. Check 'nginx -T' and 'docker compose logs keycloak' if the admin console still does not load."
+      ;;
+  esac
 }
 
 update_credebl_env() {
@@ -269,12 +395,28 @@ restart_keycloak() {
   )
 }
 
+wait_for_keycloak() {
+  local attempt
+
+  log "Waiting for Keycloak to become reachable on http://127.0.0.1:${KEYCLOAK_PORT} ..."
+  for attempt in $(seq 1 30); do
+    if curl -fsS "http://127.0.0.1:${KEYCLOAK_PORT}/health/ready" >/dev/null 2>&1 || \
+       curl -fsS "http://127.0.0.1:${KEYCLOAK_PORT}" >/dev/null 2>&1; then
+      log "Keycloak is responding locally."
+      return
+    fi
+    sleep 2
+  done
+
+  warn "Keycloak did not report ready within the expected time window; continuing with verification anyway."
+}
+
 print_summary() {
   echo ""
   echo "============================================================"
   echo " Keycloak HTTPS setup complete"
   echo "============================================================"
-  if [[ "$SKIP_CERTBOT" -eq 0 ]]; then
+  if cert_paths_exist && [[ "$SKIP_CERTBOT" -eq 0 ]]; then
     echo " URL: https://$DOMAIN"
   else
     echo " URL: http://$DOMAIN"
@@ -302,10 +444,14 @@ main() {
   install_packages
   configure_firewall
   check_dns
-  write_nginx_config
+  disable_conflicting_sites
+  write_nginx_http_config
   issue_certificate
+  write_nginx_https_config
   update_credebl_env
   restart_keycloak
+  wait_for_keycloak
+  verify_proxy_setup
   print_summary
 }
 
