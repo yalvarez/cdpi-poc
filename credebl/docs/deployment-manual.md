@@ -76,9 +76,12 @@ Keep both database variables present in `.env` using the full URL-encoded passwo
 ```env
 DATABASE_URL=postgresql://credebl:REPLACE_WITH_URLENCODED_PASSWORD@postgres:5432/credebl
 POOL_DATABASE_URL=postgresql://credebl:REPLACE_WITH_URLENCODED_PASSWORD@postgres:5432/credebl
+API_GATEWAY_PROTOCOL=http
+API_GATEWAY_HOST=0.0.0.0
+API_ENDPOINT=YOUR_VPS_IP:5000
 ```
 
-> The `seed` container's Prisma setup expects `POOL_DATABASE_URL`, and Docker does not expand `${POSTGRES_PASSWORD}` inside `env_file` values. If the password contains `@`, `:`, or `/`, URL-encode it first (for example `@` → `%40`).
+> The `seed` container's Prisma setup expects `POOL_DATABASE_URL`, and Docker does not expand `${POSTGRES_PASSWORD}` inside `env_file` values. If the password contains `@`, `:`, or `/`, URL-encode it first (for example `@` → `%40`). Also keep `API_GATEWAY_HOST=0.0.0.0`; the compiled app calls `app.listen(PORT, API_GATEWAY_HOST)` and will crash with `getaddrinfo EAI_AGAIN undefined` if that variable is missing.
 
 ### 3. Pull all images
 
