@@ -15,6 +15,7 @@ cdpi-poc/
 │   ├── setup-vps.sh               ← One-time Ubuntu VPS setup
 │   ├── health-check.sh            ← CREDEBL post-deploy verification
 │   ├── health-check-inji.sh       ← INJI post-deploy verification
+│   ├── bootstrap-platform-admin.sh ← CREDEBL platform-admin sync (auto-run on fresh deploy)
 │   └── generate-inji-certs.sh     ← INJI keystore generation (run once)
 │
 ├── credebl/                       ← DPG Option A

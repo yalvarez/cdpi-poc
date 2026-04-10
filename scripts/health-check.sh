@@ -49,6 +49,7 @@ check "mailpit"    "docker compose ps mailpit | grep -q 'running\|Up'"
 
 echo ""
 echo "── CREDEBL services ────────────────────────────────────────"
+check "platform-admin-bootstrap" "docker compose ps platform-admin-bootstrap | grep -qi 'exited (0)\|exit 0\|completed'"
 check "api-gateway"        "docker compose ps api-gateway | grep -q 'running\|Up'"
 check "user"               "docker compose ps user | grep -q 'running\|Up'"
 check "utility"            "docker compose ps utility | grep -q 'running\|Up'"

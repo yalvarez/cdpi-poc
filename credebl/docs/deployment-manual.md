@@ -282,7 +282,7 @@ See `docs/test-flows.md` for step-by-step curl commands to test:
 
 > **Studio first-login note**: Studio authenticates with the seeded platform user `admin@cdpi-poc.local` and the value of `PLATFORM_ADMIN_INITIAL_PASSWORD` (default: `changeme`) — **not** with the Keycloak master admin password. The bundled `keycloak-realm.json` already registers `http://YOUR_VPS_IP:3000/*` as a valid redirect URI. If you access Studio from a different address (e.g. a domain), add the redirect URI in Keycloak Console → `credebl-realm` → Clients → `credebl-client` → Valid redirect URIs.
 >
-> **Fresh-install note**: `docker compose up -d` now runs the one-shot `platform-admin-bootstrap` service after `seed` to ensure the Keycloak user exists, its password is set, and the Postgres record gets the correct `keycloakUserId`. The manual `bash ../scripts/fix-credebl-studio-login.sh` step is only for repairing older VPS deployments that were created before this change.
+> **Fresh-install note**: `docker compose up -d` now runs the one-shot `platform-admin-bootstrap` service after `seed` to ensure the Keycloak user exists, its password is set, and the Postgres record gets the correct `keycloakUserId`. If you ever need to re-sync that account manually on an existing VPS, run `docker compose run --rm platform-admin-bootstrap`.
 
 ---
 
