@@ -34,6 +34,14 @@ git clone <CDPI_REPO_URL> .
 
 ### 2. Configure environment
 
+**Recommended (interactive):**
+```bash
+bash ../scripts/init-credebl.sh
+```
+
+This prompts for the required values, writes `credebl/.env`, updates the seed host config, and runs the Docker startup commands automatically.
+
+**Manual alternative:**
 ```bash
 cd credebl
 cp .env.example .env

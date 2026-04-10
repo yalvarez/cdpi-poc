@@ -13,6 +13,7 @@ cdpi-poc/
 ├── .gitignore
 ├── scripts/
 │   ├── setup-vps.sh               ← One-time Ubuntu VPS setup
+│   ├── init-credebl.sh            ← Interactive CREDEBL first-time deploy helper
 │   ├── health-check.sh            ← CREDEBL post-deploy verification
 │   ├── health-check-inji.sh       ← INJI post-deploy verification
 │   ├── bootstrap-platform-admin.sh ← CREDEBL platform-admin sync (auto-run on fresh deploy)
@@ -90,6 +91,12 @@ sudo bash scripts/setup-vps.sh
 ```
 
 ### CREDEBL
+```bash
+# Recommended: interactive initializer
+bash scripts/init-credebl.sh
+```
+
+Manual alternative:
 ```bash
 cd credebl
 cp .env.example .env && nano .env
