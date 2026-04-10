@@ -16,11 +16,11 @@ VPS_IP="YOUR_VPS_IP"  # replace with your actual VPS IP
 BASE="http://$VPS_IP:5000"
 
 # 1. Login and get token
-# Default admin password is "changeme" (set by platformAdminData in credebl-master-table.json,
-# encrypted with CRYPTO_PRIVATE_KEY=cdpi-poc-crypto-key-change-me)
+# Initial admin login uses the same value you set for KEYCLOAK_ADMIN_PASSWORD in .env.
+# Example: export ADMIN_PASSWORD='your-keycloak-admin-password'
 TOKEN=$(curl -s -X POST "$BASE/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@cdpi-poc.local","password":"changeme"}' \
+  -d "{\"email\":\"admin@cdpi-poc.local\",\"password\":\"${ADMIN_PASSWORD:-CHANGE_ME_TO_KEYCLOAK_ADMIN_PASSWORD}\"}" \
   | jq -r '.access_token')
 
 echo "Token: ${TOKEN:0:40}..."  # Should show a JWT prefix
@@ -274,8 +274,8 @@ echo ""
 echo "── Authentication ──"
 LOGIN=$(curl -s -X POST "$BASE/auth/login" \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"admin@cdpi-poc.local\",\"password\":\"${ADMIN_PASSWORD:-changeme}\"}" | jq .)
-# ADMIN_PASSWORD defaults to "changeme" — the value encrypted in credebl-master-table.json
+  -d "{\"email\":\"admin@cdpi-poc.local\",\"password\":\"${ADMIN_PASSWORD:-CHANGE_ME_TO_KEYCLOAK_ADMIN_PASSWORD}\"}" | jq .)
+# ADMIN_PASSWORD should match KEYCLOAK_ADMIN_PASSWORD from .env for the bundled platform-admin user.
 check "Login returns token" "$LOGIN" '.access_token | length > 0'
 TOKEN=$(echo $LOGIN | jq -r '.access_token')
 

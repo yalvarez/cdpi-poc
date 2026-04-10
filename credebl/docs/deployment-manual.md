@@ -270,8 +270,8 @@ See `docs/test-flows.md` for step-by-step curl commands to test:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| **Studio (web UI)** | `http://VPS_IP:3000` | CREDEBL user account |
-| CREDEBL API | `http://VPS_IP:5000` | JWT (from /auth/login) |
+| **Studio (web UI)** | `http://VPS_IP:3000` | Initial login: `admin@cdpi-poc.local` / value of `KEYCLOAK_ADMIN_PASSWORD` |
+| CREDEBL API | `http://VPS_IP:5000` | JWT (from `/auth/login` using the same password) |
 | Keycloak Console | `http://VPS_IP:8080` | KEYCLOAK_ADMIN_USER / PASSWORD |
 | MinIO Console | `http://VPS_IP:9001` | MINIO_ROOT_USER / PASSWORD |
 | Mailpit (email) | `http://VPS_IP:8025` | No auth |

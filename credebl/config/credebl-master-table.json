@@ -187,7 +187,7 @@
   ],
   "_notes": {
     "seed_compatibility": "This file intentionally mirrors the upstream CREDEBL seed schema. Do not prune the top-level keys unless you also update the seed container code.",
-    "default_platform_login": "If you keep the default CRYPTO_PRIVATE_KEY from .env.example, the seeded platform admin login is admin@cdpi-poc.local / changeme.",
+    "default_platform_login": "Legacy note: `changeme` is only the encrypted seed placeholder. In the current self-contained Keycloak-backed PoC, sign in as admin@cdpi-poc.local using the value of KEYCLOAK_ADMIN_PASSWORD from .env.",
     "public_host_placeholder": "Replace YOUR_VPS_IP with the real public IP or DNS name before first deploy so the seeded platform config and issuance links point to the correct host."
   }
 }
