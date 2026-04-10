@@ -174,6 +174,22 @@ export default function OrganizationOnboarding(): React.JSX.Element {
     cityId: yup.number().nullable(),
   })
 
+  const extractErrorMessage = (result: AxiosResponse | string): string => {
+    if (typeof result === 'string') {
+      return result
+    }
+
+    return (
+      (result?.data?.message as string) ||
+      'An unexpected error occurred. Please try again.'
+    )
+  }
+
+  const isLogoStorageError = (message: string): boolean =>
+    /aws access key id you provided does not exist in our records|invalidaccesskeyid|signaturedoesnotmatch/i.test(
+      message,
+    )
+
   const handleUpdateOrganization = async (
     values: IOrgFormValues,
   ): Promise<void> => {
@@ -194,19 +210,45 @@ export default function OrganizationOnboarding(): React.JSX.Element {
         isPublic,
       }
 
-      const resCreateOrg = await updateOrganization(orgData, orgId as string)
+      let skippedLogoUpload = false
+      let resUpdateOrg: AxiosResponse | string = await updateOrganization(
+        orgData,
+        orgId as string,
+      )
+      let data =
+        typeof resUpdateOrg === 'string'
+          ? undefined
+          : (resUpdateOrg as AxiosResponse).data
+      let responseMessage = extractErrorMessage(resUpdateOrg)
 
-      const { data } = resCreateOrg as AxiosResponse
+      if (orgData.logo && isLogoStorageError(responseMessage)) {
+        skippedLogoUpload = true
+        resUpdateOrg = await updateOrganization(
+          { ...orgData, logo: '' },
+          orgId as string,
+        )
+        data =
+          typeof resUpdateOrg === 'string'
+            ? undefined
+            : (resUpdateOrg as AxiosResponse).data
+        responseMessage = extractErrorMessage(resUpdateOrg)
+      }
 
       if (data?.statusCode === apiStatusCodes.API_STATUS_SUCCESS) {
-        setSuccess(data?.message as string)
+        setSuccess(
+          skippedLogoUpload
+            ? 'Organization updated. Logo upload was skipped because MinIO/S3 is not ready yet.'
+            : (data?.message as string),
+        )
 
         if (orgId) {
           dispatch(
             setTenantData({
               id: orgId,
               name: values.name,
-              logoUrl: values.logoPreview ?? orgData?.logo,
+              logoUrl: skippedLogoUpload
+                ? orgData.logo || undefined
+                : (values.logoPreview ?? orgData?.logo),
             }),
           )
         }
@@ -216,7 +258,11 @@ export default function OrganizationOnboarding(): React.JSX.Element {
           router.push('/dashboard')
         }, 3000)
       } else {
-        setFailure(resCreateOrg as string)
+        setFailure(
+          isLogoStorageError(responseMessage)
+            ? `${responseMessage} Re-run MinIO setup on the server or retry without a logo.`
+            : responseMessage,
+        )
       }
     } catch (error) {
       console.error('Error updating organization:', error)
@@ -244,8 +290,23 @@ export default function OrganizationOnboarding(): React.JSX.Element {
         cityId: cities.length > 0 ? values.cityId : null,
       }
 
-      const resCreateOrg = await createOrganization(orgData)
-      const { data } = resCreateOrg as AxiosResponse
+      let skippedLogoUpload = false
+      let resCreateOrg: AxiosResponse | string = await createOrganization(orgData)
+      let data =
+        typeof resCreateOrg === 'string'
+          ? undefined
+          : (resCreateOrg as AxiosResponse).data
+      let responseMessage = extractErrorMessage(resCreateOrg)
+
+      if (orgData.logo && isLogoStorageError(responseMessage)) {
+        skippedLogoUpload = true
+        resCreateOrg = await createOrganization({ ...orgData, logo: '' })
+        data =
+          typeof resCreateOrg === 'string'
+            ? undefined
+            : (resCreateOrg as AxiosResponse).data
+        responseMessage = extractErrorMessage(resCreateOrg)
+      }
 
       if (data?.statusCode === apiStatusCodes.API_STATUS_CREATED) {
         const orgId = data?.data?.id || data?.data?._id
@@ -254,11 +315,15 @@ export default function OrganizationOnboarding(): React.JSX.Element {
         dispatch(
           setTenantData({
             id: orgId,
-            name: data.name,
-            logoUrl: data.logoUrl,
+            name: data?.data?.name || values.name,
+            logoUrl: skippedLogoUpload ? '' : data?.data?.logoUrl,
           }),
         )
-        setSuccess(data.message as string)
+        setSuccess(
+          skippedLogoUpload
+            ? 'Organization created. Logo upload was skipped because MinIO/S3 is not ready yet.'
+            : (data.message as string),
+        )
 
         setTimeout(() => {
           const redirectUrl =
@@ -268,7 +333,11 @@ export default function OrganizationOnboarding(): React.JSX.Element {
           router.push(redirectUrl)
         }, 3000)
       } else {
-        setFailure(resCreateOrg as string)
+        setFailure(
+          isLogoStorageError(responseMessage)
+            ? `${responseMessage} Re-run MinIO setup on the server or retry without a logo.`
+            : responseMessage,
+        )
       }
     } catch (error) {
       console.error('Error creating organization:', error)

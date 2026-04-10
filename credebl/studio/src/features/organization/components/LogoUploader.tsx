@@ -41,7 +41,7 @@ export default function LogoUploader({
 
   return (
     <div>
-      <Label className="mb-2 block pb-4">Organization Logo</Label>
+      <Label className="mb-2 block pb-4">Organization Logo (optional)</Label>
       <div className="border-input flex items-center gap-4 rounded-md border p-4">
         <Avatar className="h-24 w-24 rounded-none">
           <AvatarImage

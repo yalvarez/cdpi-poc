@@ -47,6 +47,7 @@ check "redis"      "docker compose ps redis | grep -q '(healthy)'"
 check "nats"       "docker compose ps nats | grep -q '(healthy)'"
 check "keycloak"   "docker compose ps keycloak | grep -q '(healthy)'"
 check "minio"      "docker compose ps minio | grep -q '(healthy)'"
+check "minio-setup" "docker inspect --format='{{.State.Status}} {{.State.ExitCode}}' credebl-minio-setup 2>/dev/null | grep -Eqi '^exited 0$'"
 check "mailpit"    "docker compose ps mailpit | grep -q 'running\|Up'"
 
 echo ""
@@ -62,6 +63,7 @@ check "organization"       "docker compose ps organization | grep -q 'running\|U
 check "verification"       "docker compose ps verification | grep -q 'running\|Up'"
 check "agent-provisioning" "docker compose ps agent-provisioning | grep -q 'running\|Up'"
 check "agent-service"      "docker compose ps agent-service | grep -q 'running\|Up'"
+check "cloud-wallet"       "docker compose ps cloud-wallet | grep -q 'running\|Up'"
 check "schema-file-server" "docker compose ps schema-file-server | grep -q 'running\|Up'"
 
 echo ""

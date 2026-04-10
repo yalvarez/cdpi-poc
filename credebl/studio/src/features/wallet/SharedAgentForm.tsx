@@ -92,8 +92,18 @@ const SharedAgentForm = ({
     }
 
     try {
-      const res = (await spinupSharedAgent(payload, orgId)) as AxiosResponse
-      const { data } = res
+      const res = await spinupSharedAgent(payload, orgId)
+
+      if (typeof res === 'string') {
+        setError(
+          /create-tenant/i.test(res)
+            ? 'Shared wallet service is not available yet. Start the `cloud-wallet` service and retry.'
+            : res,
+        )
+        return
+      }
+
+      const { data } = res as AxiosResponse
 
       if (data?.statusCode === apiStatusCodes.API_STATUS_CREATED) {
         onSuccess?.(data)
@@ -102,7 +112,11 @@ const SharedAgentForm = ({
       }
     } catch (err) {
       console.error('Failed to create shared wallet', err)
-      throw err
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to create shared wallet',
+      )
     } finally {
       setLoading(false)
     }

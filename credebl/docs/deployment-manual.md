@@ -141,8 +141,14 @@ Expected last line: `MinIO setup complete`
 
 If you need to re-run it (e.g. after changing credentials):
 ```bash
-docker compose up --force-recreate minio-setup
+docker compose up -d --force-recreate minio-setup
 ```
+
+> If organization creation fails with `The AWS Access Key Id you provided does not exist in our records`, MinIO is up but the S3 user was not bootstrapped with the current `.env` values. Re-run `minio-setup`, then recreate the affected services:
+>
+> ```bash
+> docker compose up -d --force-recreate minio-setup api-gateway organization utility
+> ```
 
 ### 6. Start Keycloak
 
@@ -343,6 +349,24 @@ free -h
 ```
 
 If memory is critical, stop the `webhook` service first. The self-contained PoC does not include the `geolocation` microservice by default; if the Country / State / City dropdowns are empty in Studio, you can still continue because those fields are optional in the PoC flow.
+
+### Wallet creation fails with `There are no subscribers listening to that message ("{\"cmd\":\"create-tenant\"}")`
+
+That error means the `cloud-wallet` microservice is not running, so the Studio shared-wallet flow has no NATS subscriber for tenant creation.
+
+Fix:
+```bash
+cd credebl
+docker compose up -d cloud-wallet api-gateway organization agent-provisioning agent-service
+```
+
+Then confirm:
+```bash
+docker compose ps cloud-wallet
+docker compose logs --tail=100 cloud-wallet
+```
+
+Expected result: `cloud-wallet` stays `Up`, and retrying **Create Shared Wallet** in Studio should no longer return the `create-tenant` subscriber error.
 
 ### schema-file-server keeps restarting (`InvalidCharacterError: Failed to decode base64`)
 
