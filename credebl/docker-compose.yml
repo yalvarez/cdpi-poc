@@ -218,6 +218,11 @@ services:
     container_name: credebl-schema-file-server
     restart: unless-stopped
     env_file: .env
+    environment:
+      # schema-file-server expects CRYPTO_PRIVATE_KEY as base64-encoded string.
+      # Other services use the raw value from .env directly.
+      # This is base64("cdpi-poc-crypto-key-change-me")
+      CRYPTO_PRIVATE_KEY: "Y2RwaS1wb2MtY3J5cHRvLWtleS1jaGFuZ2UtbWU="
     ports:
       - "4000:4000"
     depends_on:
