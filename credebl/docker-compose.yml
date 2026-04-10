@@ -6,7 +6,9 @@
 #            Keycloak → included (used as OIDC provider + mock)
 #
 # Excluded for PoC (non-critical for issuance/verification):
-#   cloud-wallet, geolocation, notification, webhook
+#   cloud-wallet, notification, webhook
+# Note: `geo-location` is kept because Studio's organization flow needs the
+# `/countries`, `/states`, and `/cities` endpoints to populate the form.
 #
 # RAM budget (~8GB VPS):
 #   Infrastructure (postgres, redis, nats, keycloak, minio, mailpit) ~2.5GB
@@ -422,6 +424,28 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── Geo-location service (countries/states/cities) ─────────────────────────
+  geo-location:
+    image: ghcr.io/credebl/geo-location:latest
+    container_name: credebl-geo-location
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
       api-gateway:
         condition: service_healthy
     networks:
