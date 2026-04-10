@@ -65,6 +65,7 @@ check "schema-file-server" "docker compose ps schema-file-server | grep -q 'runn
 echo ""
 echo "── Endpoints ───────────────────────────────────────────────"
 check "API Gateway HTTP" "curl -sf http://localhost:5000/api-json | grep -q 'openapi'"
+check "API Gateway CORS" "curl -sI -H 'Origin: ${STUDIO_URL:-http://localhost:3000}' http://localhost:5000/api-json | tr -d '\r' | grep -Fqi \"access-control-allow-origin: ${STUDIO_URL:-http://localhost:3000}\""
 check "Keycloak HTTP"    "curl -sf http://localhost:8080/realms/${KEYCLOAK_REALM_CHECK}/.well-known/openid-configuration | grep -q 'issuer'"
 check "MinIO HTTP"       "curl -sf http://localhost:9000/minio/health/live"
 check "Mailpit HTTP"     "curl -sf http://localhost:8025"

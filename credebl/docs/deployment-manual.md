@@ -75,6 +75,7 @@ CRYPTO_PRIVATE_KEY=cdpi-poc-crypto-key-change-me
 NATS_AUTH_TYPE=none
 ELK_LOG=false
 APP_PROTOCOL=http
+ENABLE_CORS_IP_LIST=http://YOUR_VPS_IP:3000,http://localhost:3000,http://127.0.0.1:3000
 ```
 
 > **Redis note**: in this PoC, keep `REDIS_PASSWORD` empty. The bundled `issuance` worker uses Bull with `host` + `port` only and does not send a Redis password, so enabling `requirepass` causes the repeated `NOAUTH Authentication required` errors seen in `docker compose logs issuance`.
@@ -98,6 +99,8 @@ API_ENDPOINT=YOUR_VPS_IP:5000
 ```
 
 > Docker does not expand `${POSTGRES_PASSWORD}` inside `env_file` values, so the full URL must be written out literally. Keep `API_GATEWAY_HOST=0.0.0.0`; the compiled app calls `app.listen(PORT, API_GATEWAY_HOST)` and will crash with `getaddrinfo EAI_AGAIN undefined` if that variable is missing.
+
+> **CORS note**: `ENABLE_CORS_IP_LIST` must include the exact Studio origin (for example `http://YOUR_VPS_IP:3000`). If it is missing, Studio can accept the login form but fail to redirect to `/dashboard`, and dropdowns such as **Country / State / City** remain empty because the browser blocks requests to the API gateway on port `5000`.
 
 ### 3. Pull all images
 
