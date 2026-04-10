@@ -143,6 +143,7 @@ bash ../scripts/health-check-inji.sh
 ### CREDEBL
 | Service | URL |
 |---------|-----|
+| Studio (web UI) | `http://VPS_IP:3000` |
 | API Gateway | `http://VPS_IP:5000` |
 | Keycloak | `http://VPS_IP:8080` |
 | MinIO console | `http://VPS_IP:9001` |

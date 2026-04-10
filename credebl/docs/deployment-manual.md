@@ -166,6 +166,8 @@ This script will:
 docker compose up -d
 ```
 
+This now includes the locally built `studio` frontend at `http://YOUR_VPS_IP:3000`.
+
 ### 9. Watch startup progress
 
 ```bash
@@ -268,11 +270,14 @@ See `docs/test-flows.md` for step-by-step curl commands to test:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
+| **Studio (web UI)** | `http://VPS_IP:3000` | CREDEBL user account |
 | CREDEBL API | `http://VPS_IP:5000` | JWT (from /auth/login) |
 | Keycloak Console | `http://VPS_IP:8080` | KEYCLOAK_ADMIN_USER / PASSWORD |
 | MinIO Console | `http://VPS_IP:9001` | MINIO_ROOT_USER / PASSWORD |
 | Mailpit (email) | `http://VPS_IP:8025` | No auth |
 | Schema Server | `http://VPS_IP:4000` | No auth |
+
+> **Studio first-login note**: Studio authenticates via Keycloak. The bundled `keycloak-realm.json` already registers `http://YOUR_VPS_IP:3000/*` as a valid redirect URI. If you access Studio from a different address (e.g. a domain), add the redirect URI in Keycloak Console → `credebl-realm` → Clients → `credebl-client` → Valid redirect URIs.
 
 ---
 
