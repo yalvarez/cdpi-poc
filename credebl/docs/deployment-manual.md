@@ -342,7 +342,7 @@ docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}"
 free -h
 ```
 
-If memory is critical, stop the `webhook` service first. Keep `geo-location` running, because Studio uses it to populate the Country / State / City dropdowns during organization creation.
+If memory is critical, stop the `webhook` service first. The self-contained PoC does not include the `geolocation` microservice by default; if the Country / State / City dropdowns are empty in Studio, you can still continue because those fields are optional in the PoC flow.
 
 ### schema-file-server keeps restarting (`InvalidCharacterError: Failed to decode base64`)
 

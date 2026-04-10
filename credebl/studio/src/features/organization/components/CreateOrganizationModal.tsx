@@ -167,7 +167,9 @@ export default function OrganizationOnboarding(): React.JSX.Element {
       .max(500)
       .required('Description is required'),
     website: yup.string().url('Enter a valid URL').nullable(),
-    countryId: yup.number().required('Country is required'),
+    // In the self-contained PoC the geolocation microservice may be unavailable,
+    // so country/state/city must remain optional to let org creation continue.
+    countryId: yup.number().nullable(),
     stateId: yup.number().nullable(),
     cityId: yup.number().nullable(),
   })
@@ -185,7 +187,7 @@ export default function OrganizationOnboarding(): React.JSX.Element {
         description: values.description,
         logo: logoPreview || values?.logoUrl || '',
         website: values.website || '',
-        countryId: values.countryId,
+        countryId: countries.length > 0 ? values.countryId : null,
         // Only include state/city if they exist and are selected
         stateId: states.length > 0 ? values.stateId : null,
         cityId: cities.length > 0 ? values.cityId : null,
@@ -237,7 +239,7 @@ export default function OrganizationOnboarding(): React.JSX.Element {
         description: values.description,
         logo: logoPreview || '',
         website: values.website || '',
-        countryId: values.countryId,
+        countryId: countries.length > 0 ? values.countryId : null,
         stateId: states.length > 0 ? values.stateId : null,
         cityId: cities.length > 0 ? values.cityId : null,
       }
@@ -394,8 +396,17 @@ export default function OrganizationOnboarding(): React.JSX.Element {
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div>
                       <Label className="pb-2">
-                        Country <span className="text-destructive">*</span>
+                        Country
+                        {countries.length > 0 && (
+                          <span className="text-destructive">*</span>
+                        )}
                       </Label>
+                      {!countries.length && (
+                        <p className="text-muted-foreground mb-2 text-xs">
+                          Country lookup is unavailable in this self-contained PoC.
+                          You can continue without selecting country/state/city.
+                        </p>
+                      )}
                       <Select
                         name="countryId"
                         value={
@@ -415,6 +426,7 @@ export default function OrganizationOnboarding(): React.JSX.Element {
                             await fetchStates(countryId)
                           }
                         }}
+                        disabled={countries.length === 0}
                       >
                         <SelectTrigger className="disabled:bg-muted flex h-10 w-full items-center justify-between border px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50">
                           <SelectValue placeholder="Select country" />
@@ -606,7 +618,6 @@ export default function OrganizationOnboarding(): React.JSX.Element {
                         disabled={
                           !values.name ||
                           !values.description ||
-                          !values.countryId ||
                           (states.length > 0 && !values.stateId) ||
                           (cities.length > 0 && !values.cityId) ||
                           loading
@@ -622,7 +633,6 @@ export default function OrganizationOnboarding(): React.JSX.Element {
                           disabled={
                             !values.name ||
                             !values.description ||
-                            !values.countryId ||
                             (states.length > 0 && !values.stateId) ||
                             (cities.length > 0 && !values.cityId) ||
                             loading
