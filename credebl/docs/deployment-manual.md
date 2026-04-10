@@ -13,7 +13,7 @@ Your VPS must have:
 - Ubuntu 22.04 or 24.04 LTS
 - 4 CPU cores, 8GB RAM, 150GB disk
 - Docker Engine (installed by setup-vps.sh)
-- Ports open: 22, 80, 443, 5000, 8080, 9001, 8025, 4000
+- Ports open: 22, 80, 443, 3000, 5000, 8080, 9001, 8025, 4000
 
 If the VPS is fresh, run the setup script first:
 
@@ -67,6 +67,14 @@ MINIO_ROOT_PASSWORD=<strong-password>
 AWS_ACCESS_KEY_ID=<alphanumeric only — e.g. credebls3>
 AWS_SECRET_ACCESS_KEY=<alphanumeric only — e.g. run: openssl rand -hex 16>
 PLATFORM_SEED=<run: openssl rand -hex 16>
+PLATFORM_WALLET_NAME=platformadminwallet
+PLATFORM_WALLET_PASSWORD=<run: openssl rand -hex 16>
+AGENT_API_KEY=<run: openssl rand -hex 32>
+AGENT_PROTOCOL=http
+WALLET_STORAGE_HOST=postgres
+WALLET_STORAGE_PORT=5432
+WALLET_STORAGE_USER=credebl
+WALLET_STORAGE_PASSWORD=<copy POSTGRES_PASSWORD>
 JWT_SECRET=<run: openssl rand -hex 32>
 JWT_TOKEN_SECRET=<run: openssl rand -base64 32>
 PLATFORM_ADMIN_EMAIL=admin@cdpi-poc.local
@@ -220,6 +228,7 @@ Expected output:
 ✓ minio           healthy
 ✓ mailpit         running
 ✓ api-gateway     healthy  http://VPS_IP:5000
+✓ studio          running  http://VPS_IP:3000
 ✓ schema-file-server  running  http://VPS_IP:4000
 All services healthy — PoC stack is ready
 ```
@@ -350,23 +359,36 @@ free -h
 
 If memory is critical, stop the `webhook` service first. The self-contained PoC does not include the `geolocation` microservice by default; if the Country / State / City dropdowns are empty in Studio, you can still continue because those fields are optional in the PoC flow.
 
-### Wallet creation fails with `There are no subscribers listening to that message ("{\"cmd\":\"create-tenant\"}")`
+### Shared wallet creation still fails on `POST /orgs/:orgId/agents/wallet`
 
-That error means the `cloud-wallet` microservice is not running, so the Studio shared-wallet flow has no NATS subscriber for tenant creation.
+If `cloud-wallet`, `agent-provisioning`, and `agent-service` are all already `Up`, the remaining failure is usually **platform-admin shared-agent provisioning**, not the `cloud-wallet` container itself.
+
+The shared-wallet path depends on these `.env` values being present and consistent:
+- `PLATFORM_WALLET_NAME`
+- `PLATFORM_WALLET_PASSWORD`
+- `AGENT_API_KEY`
+- `WALLET_STORAGE_HOST`
+- `WALLET_STORAGE_PORT`
+- `WALLET_STORAGE_USER`
+- `WALLET_STORAGE_PASSWORD` (same value as `POSTGRES_PASSWORD` in this PoC)
 
 Fix:
 ```bash
 cd credebl
-docker compose up -d cloud-wallet api-gateway organization agent-provisioning agent-service
+grep -E '^(PLATFORM_WALLET_NAME|PLATFORM_WALLET_PASSWORD|AGENT_API_KEY|WALLET_STORAGE_HOST|WALLET_STORAGE_PORT|WALLET_STORAGE_USER|WALLET_STORAGE_PASSWORD)=' .env
+
+docker compose up -d --force-recreate agent-provisioning agent-service cloud-wallet
+
+docker compose logs --tail=200 agent-service
+docker compose logs --tail=200 agent-provisioning
 ```
 
-Then confirm:
-```bash
-docker compose ps cloud-wallet
-docker compose logs --tail=100 cloud-wallet
-```
+Look for errors mentioning:
+- `Platform admin agent is not spun up`
+- `Error while creating the wallet`
+- missing wallet storage or API key values
 
-Expected result: `cloud-wallet` stays `Up`, and retrying **Create Shared Wallet** in Studio should no longer return the `create-tenant` subscriber error.
+Expected result: the platform-admin shared agent initializes successfully, and retrying **Create Shared Wallet** in Studio stops returning the `create-tenant` 500.
 
 ### schema-file-server keeps restarting (`InvalidCharacterError: Failed to decode base64`)
 

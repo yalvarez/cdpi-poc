@@ -35,7 +35,8 @@ apt-get install -y -qq \
   ca-certificates \
   gnupg \
   lsb-release \
-  openssl
+  openssl \
+  python3
 
 # ── 2. Install Docker ─────────────────────────────────────────────────────────
 echo ""
@@ -69,6 +70,9 @@ ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow ssh
+ufw allow 80/tcp    comment 'HTTP reverse proxy / ACME challenge'
+ufw allow 443/tcp   comment 'HTTPS reverse proxy'
+ufw allow 3000/tcp  comment 'CREDEBL Studio'
 ufw allow 5000/tcp  comment 'CREDEBL API Gateway'
 ufw allow 8080/tcp  comment 'Keycloak OIDC'
 ufw allow 9001/tcp  comment 'MinIO Console'
@@ -77,7 +81,7 @@ ufw allow 4000/tcp  comment 'Schema File Server'
 # Uncomment if you want to expose MinIO S3 API directly:
 # ufw allow 9000/tcp  comment 'MinIO S3 API'
 ufw --force enable
-echo "  Firewall configured. Open ports: 22, 5000, 8080, 9001, 8025, 4000"
+echo "  Firewall configured. Open ports: 22, 80, 443, 3000, 5000, 8080, 9001, 8025, 4000"
 
 # ── 4. Configure swap (helps with 8GB RAM + 20 containers) ───────────────────
 echo ""

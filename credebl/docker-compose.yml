@@ -568,7 +568,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - ROOT_PATH=/app/agent-provisioning/AFJ/agent-config
+      ROOT_PATH: /app/agent-provisioning/AFJ/agent-config
+      AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey}
     volumes:
       - agent_config:/app/agent-provisioning/AFJ/agent-config
       - agent_token:/app/agent-provisioning/AFJ/token
@@ -596,6 +597,15 @@ services:
     container_name: credebl-agent-service
     restart: unless-stopped
     env_file: .env
+    environment:
+      PLATFORM_WALLET_NAME: ${PLATFORM_WALLET_NAME:-platformadminwallet}
+      PLATFORM_WALLET_PASSWORD: ${PLATFORM_WALLET_PASSWORD:-platformadminwallet123}
+      WALLET_STORAGE_HOST: ${WALLET_STORAGE_HOST:-postgres}
+      WALLET_STORAGE_PORT: ${WALLET_STORAGE_PORT:-5432}
+      WALLET_STORAGE_USER: ${WALLET_STORAGE_USER:-credebl}
+      WALLET_STORAGE_PASSWORD: ${POSTGRES_PASSWORD}
+      AGENT_PROTOCOL: ${AGENT_PROTOCOL:-http}
+      AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey}
     command: >
       sh -c 'until (docker logs credebl-agent-provisioning 2>&1 | grep "Agent-Provisioning-Service Microservice is listening to NATS"); do sleep 2; done && node dist/apps/agent-service/main.js'
     volumes:

@@ -96,8 +96,8 @@ const SharedAgentForm = ({
 
       if (typeof res === 'string') {
         setError(
-          /create-tenant/i.test(res)
-            ? 'Shared wallet service is not available yet. Start the `cloud-wallet` service and retry.'
+          /create-tenant|platform admin agent|not able to spun up|not configured/i.test(res)
+            ? 'Shared wallet provisioning is not ready yet. Verify `agent-service` initialized the platform-admin shared agent, then retry.'
             : res,
         )
         return

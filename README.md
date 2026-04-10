@@ -92,15 +92,18 @@ sudo bash scripts/setup-vps.sh
 
 ### CREDEBL
 ```bash
-# Recommended: interactive initializer
+# Recommended zero-to-running path on a fresh VPS
 bash scripts/init-credebl.sh
 ```
+
+This interactive initializer now fills the required **shared-wallet / agent provisioning** values too (`PLATFORM_WALLET_*`, `AGENT_API_KEY`, `WALLET_STORAGE_*`), updates `credebl/config/credebl-master-table.json`, and starts the stack.
 
 Manual alternative:
 ```bash
 cd credebl
 cp .env.example .env && nano .env
-VPS_IP=$(curl -s ifconfig.me) && sed -i "s/YOUR_VPS_IP/$VPS_IP/g" .env credebl/config/credebl-master-table.json
+VPS_IP=$(curl -s ifconfig.me)
+sed -i "s/YOUR_VPS_IP/$VPS_IP/g" .env config/credebl-master-table.json
 # Keep API_ENDPOINT as host:port only; API_GATEWAY_PROTOCOL provides the scheme.
 docker compose pull && docker compose up -d
 bash ../scripts/health-check.sh
