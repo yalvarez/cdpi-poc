@@ -272,7 +272,7 @@ services:
       seed:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -T 5 --tries=1 -O /dev/null http://localhost:5000/; ret=$?; [ $ret -eq 0 ] || [ $ret -eq 8 ]"]
+      test: ["CMD-SHELL", "wget -q -T 5 --tries=1 -O /dev/null http://localhost:5000/; ret=$$?; [ $$ret -eq 0 ] || [ $$ret -eq 8 ]"]
       interval: 15s
       timeout: 10s
       retries: 10
