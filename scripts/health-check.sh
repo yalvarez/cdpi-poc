@@ -38,6 +38,8 @@ if [ -f .env ]; then
 fi
 
 KEYCLOAK_REALM_CHECK=${KEYCLOAK_REALM:-credebl-realm}
+STUDIO_ORIGIN=${STUDIO_URL:-http://localhost:3000}
+STUDIO_ORIGIN=${STUDIO_ORIGIN%/}
 
 echo "── Infrastructure ──────────────────────────────────────────"
 check "postgres"   "docker compose ps postgres | grep -q '(healthy)'"
@@ -65,7 +67,7 @@ check "schema-file-server" "docker compose ps schema-file-server | grep -q 'runn
 echo ""
 echo "── Endpoints ───────────────────────────────────────────────"
 check "API Gateway HTTP" "curl -sf http://localhost:5000/api-json | grep -q 'openapi'"
-check "API Gateway CORS" "curl -sI -H 'Origin: ${STUDIO_URL:-http://localhost:3000}' http://localhost:5000/api-json | tr -d '\r' | grep -Fqi \"access-control-allow-origin: ${STUDIO_URL:-http://localhost:3000}\""
+check "API Gateway CORS" "curl -si -X OPTIONS http://localhost:5000/countries -H \"Origin: ${STUDIO_ORIGIN}\" -H 'Access-Control-Request-Method: GET' | tr -d '\r' | grep -Fqi \"access-control-allow-origin: ${STUDIO_ORIGIN}\""
 check "Keycloak HTTP"    "curl -sf http://localhost:8080/realms/${KEYCLOAK_REALM_CHECK}/.well-known/openid-configuration | grep -q 'issuer'"
 check "MinIO HTTP"       "curl -sf http://localhost:9000/minio/health/live"
 check "Mailpit HTTP"     "curl -sf http://localhost:8025"

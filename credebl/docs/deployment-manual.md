@@ -78,6 +78,11 @@ APP_PROTOCOL=http
 ENABLE_CORS_IP_LIST=http://YOUR_VPS_IP:3000,http://localhost:3000,http://127.0.0.1:3000
 ```
 
+Use the exact Studio origin **without a trailing slash**:
+```env
+STUDIO_URL=http://YOUR_VPS_IP:3000
+```
+
 > **Redis note**: in this PoC, keep `REDIS_PASSWORD` empty. The bundled `issuance` worker uses Bull with `host` + `port` only and does not send a Redis password, so enabling `requirepass` causes the repeated `NOAUTH Authentication required` errors seen in `docker compose logs issuance`.
 
 > **Password character restriction**: Do NOT use `@`, `-`, or any character outside `[A-Za-z0-9]` in passwords or access keys. The `schema-file-server` (Deno) and `minio-setup` containers decode several env vars as base64 internally, and special characters cause an `InvalidCharacterError` crash. Use `openssl rand -hex 16` (hex output, always safe) for passwords and `openssl rand -base64 32` for `JWT_TOKEN_SECRET` (which is explicitly base64-decoded).
