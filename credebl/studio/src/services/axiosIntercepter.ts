@@ -34,9 +34,21 @@ instance.interceptors.request.use(
       const currentTime = Math.floor(Date.now() / 1000)
       const { refreshToken } = auth
       const client = jwtDecode<JwtPaylodCustom>(refreshToken).azp
+      const adminPortalClientId =
+        process.env.NEXT_PUBLIC_ADMIN_PORTAL_CLIENT_ID
+      const appLauncherEnabled =
+        process.env.NEXT_PUBLIC_ENABLE_APP_LAUNCHER?.toLowerCase() === 'true'
 
-      if (client === process.env.NEXT_PUBLIC_ADMIN_PORTAL_CLIENT_ID) {
-        logoutUser()
+      // In the CDPI PoC, the platform admin session can legitimately use the
+      // same client id (`adminClient`). Logging out unconditionally here ejects
+      // the user right after a successful redirect to /dashboard.
+      if (
+        appLauncherEnabled &&
+        adminPortalClientId &&
+        client === adminPortalClientId
+      ) {
+        await logoutUser()
+        return config
       }
       const refreshTokenExp = jwtDecode<JwtPayload>(refreshToken).exp
       const isRefreshTokenExpired = refreshTokenExp

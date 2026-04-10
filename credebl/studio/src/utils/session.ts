@@ -35,7 +35,8 @@ export const generateAccessToken = async (): Promise<void> => {
   const state = store.getState()
   const refreshToken = state?.auth?.refreshToken
   if (!refreshToken) {
-    logoutUser()
+    await logoutUser()
+    return
   }
   if (refreshPromise) {
     return refreshPromise
