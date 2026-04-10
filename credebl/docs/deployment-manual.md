@@ -56,14 +56,19 @@ PLATFORM_ADMIN_KEYCLOAK_SECRET=<copy KEYCLOAK_CLIENT_SECRET>
 # keep KEYCLOAK_MANAGEMENT_CLIENT_ID=adminClient
 # keep PLATFORM_ADMIN_KEYCLOAK_ID=adminClient
 MINIO_ROOT_PASSWORD=<strong-password>
+AWS_ACCESS_KEY_ID=<alphanumeric only — e.g. credebls3>
+AWS_SECRET_ACCESS_KEY=<alphanumeric only — e.g. run: openssl rand -hex 16>
 PLATFORM_SEED=<run: openssl rand -hex 16>
 JWT_SECRET=<run: openssl rand -hex 32>
+JWT_TOKEN_SECRET=<run: openssl rand -base64 32>
 PLATFORM_ADMIN_EMAIL=admin@cdpi-poc.local
 CRYPTO_PRIVATE_KEY=cdpi-poc-crypto-key-change-me
 NATS_AUTH_TYPE=none
 ELK_LOG=false
 APP_PROTOCOL=http
 ```
+
+> **Password character restriction**: Do NOT use `@`, `-`, or any character outside `[A-Za-z0-9]` in passwords or access keys. The `schema-file-server` (Deno) and `minio-setup` containers decode several env vars as base64 internally, and special characters cause an `InvalidCharacterError` crash. Use `openssl rand -hex 16` (hex output, always safe) for passwords and `openssl rand -base64 32` for `JWT_TOKEN_SECRET` (which is explicitly base64-decoded).
 
 Also replace `YOUR_VPS_IP` with your actual VPS IP address in both `.env` and the seed data file:
 ```bash
@@ -72,16 +77,16 @@ sed -i "s/YOUR_VPS_IP/$VPS_IP/g" .env config/credebl-master-table.json
 echo "Updated .env and credebl-master-table.json with VPS IP: $VPS_IP"
 ```
 
-Keep both database variables present in `.env` using the full URL-encoded password:
+Keep both database variables present in `.env` using the plain password (no URL-encoding needed if the password is alphanumeric-only):
 ```env
-DATABASE_URL=postgresql://credebl:REPLACE_WITH_URLENCODED_PASSWORD@postgres:5432/credebl
-POOL_DATABASE_URL=postgresql://credebl:REPLACE_WITH_URLENCODED_PASSWORD@postgres:5432/credebl
+DATABASE_URL=postgresql://credebl:YOUR_POSTGRES_PASSWORD@postgres:5432/credebl
+POOL_DATABASE_URL=postgresql://credebl:YOUR_POSTGRES_PASSWORD@postgres:5432/credebl
 API_GATEWAY_PROTOCOL=http
 API_GATEWAY_HOST=0.0.0.0
 API_ENDPOINT=YOUR_VPS_IP:5000
 ```
 
-> The `seed` container's Prisma setup expects `POOL_DATABASE_URL`, and Docker does not expand `${POSTGRES_PASSWORD}` inside `env_file` values. If the password contains `@`, `:`, or `/`, URL-encode it first (for example `@` → `%40`). Also keep `API_GATEWAY_HOST=0.0.0.0`; the compiled app calls `app.listen(PORT, API_GATEWAY_HOST)` and will crash with `getaddrinfo EAI_AGAIN undefined` if that variable is missing.
+> Docker does not expand `${POSTGRES_PASSWORD}` inside `env_file` values, so the full URL must be written out literally. Keep `API_GATEWAY_HOST=0.0.0.0`; the compiled app calls `app.listen(PORT, API_GATEWAY_HOST)` and will crash with `getaddrinfo EAI_AGAIN undefined` if that variable is missing.
 
 ### 3. Pull all images
 
@@ -107,22 +112,17 @@ All infrastructure containers should show `healthy` before continuing.
 
 ### 5. Set up MinIO access keys
 
-After MinIO is healthy, create the access keys CREDEBL will use:
+The `minio-setup` service runs automatically as part of `docker compose up -d` and creates the bucket and access key defined in `.env` (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`). No manual step required.
 
+To verify it ran successfully:
 ```bash
-# Open MinIO console: http://YOUR_VPS_IP:9001
-# Login: MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
-# Go to: Access Keys → Create Access Key
-# Copy the generated Access Key ID and Secret Access Key
-# Update .env:
-#   AWS_ACCESS_KEY_ID=<generated>
-#   AWS_SECRET_ACCESS_KEY=<generated>
+docker compose logs minio-setup
 ```
+Expected last line: `MinIO setup complete`
 
-Or use the CLI:
-
+If you need to re-run it (e.g. after changing credentials):
 ```bash
-docker compose run --rm minio-setup
+docker compose up --force-recreate minio-setup
 ```
 
 ### 6. Start Keycloak
@@ -178,7 +178,7 @@ The `seed` container will run Prisma migrations, seed the database, and then exi
 
 > If you change `config/keycloak-realm.json` later, remember that Keycloak only imports the realm on first creation. Reusing an existing PostgreSQL/Keycloak state will keep the old realm config until you reset the stack data.
 
-### 9. Verify deployment
+### 10. Verify deployment
 
 ```bash
 bash scripts/health-check.sh
@@ -317,6 +317,18 @@ free -h
 ```
 
 If memory is critical, stop the `geolocation` and `webhook` services (not included in PoC stack by default).
+
+### schema-file-server keeps restarting (`InvalidCharacterError: Failed to decode base64`)
+
+The Deno-based schema-file-server base64-decodes `JWT_TOKEN_SECRET` at startup. Two causes:
+
+**1. `JWT_TOKEN_SECRET` not set** — falls back to default `"your_secret_key_here"` which contains `_` (invalid in standard base64). Fix: add it to `.env`:
+```bash
+echo "JWT_TOKEN_SECRET=$(openssl rand -base64 32)" >> .env
+docker compose up -d --force-recreate schema-file-server
+```
+
+**2. `JWT_TOKEN_SECRET` set but contains invalid chars** — only `[A-Za-z0-9+/=]` are valid. Regenerate with `openssl rand -base64 32`.
 
 ### Port already in use
 

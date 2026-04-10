@@ -16,9 +16,11 @@ VPS_IP="YOUR_VPS_IP"  # replace with your actual VPS IP
 BASE="http://$VPS_IP:5000"
 
 # 1. Login and get token
+# Default admin password is "changeme" (set by platformAdminData in credebl-master-table.json,
+# encrypted with CRYPTO_PRIVATE_KEY=cdpi-poc-crypto-key-change-me)
 TOKEN=$(curl -s -X POST "$BASE/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@cdpi-poc.local","password":"YOUR_ADMIN_PASSWORD"}' \
+  -d '{"email":"admin@cdpi-poc.local","password":"changeme"}' \
   | jq -r '.access_token')
 
 echo "Token: ${TOKEN:0:40}..."  # Should show a JWT prefix
@@ -273,6 +275,7 @@ echo "── Authentication ──"
 LOGIN=$(curl -s -X POST "$BASE/auth/login" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"admin@cdpi-poc.local\",\"password\":\"${ADMIN_PASSWORD:-changeme}\"}" | jq .)
+# ADMIN_PASSWORD defaults to "changeme" — the value encrypted in credebl-master-table.json
 check "Login returns token" "$LOGIN" '.access_token | length > 0'
 TOKEN=$(echo $LOGIN | jq -r '.access_token')
 
