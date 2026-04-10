@@ -48,7 +48,7 @@ nano .env
 Minimum required values:
 ```env
 POSTGRES_PASSWORD=<strong-password>
-REDIS_PASSWORD=<strong-password>
+REDIS_PASSWORD=                      # leave blank in the self-contained PoC
 KEYCLOAK_ADMIN_PASSWORD=<strong-password>
 KEYCLOAK_CLIENT_SECRET=<run: openssl rand -hex 32>
 KEYCLOAK_MANAGEMENT_CLIENT_SECRET=<copy KEYCLOAK_CLIENT_SECRET>
@@ -62,11 +62,14 @@ PLATFORM_SEED=<run: openssl rand -hex 16>
 JWT_SECRET=<run: openssl rand -hex 32>
 JWT_TOKEN_SECRET=<run: openssl rand -base64 32>
 PLATFORM_ADMIN_EMAIL=admin@cdpi-poc.local
+PLATFORM_ADMIN_INITIAL_PASSWORD=changeme  # OPTIONAL — initial Studio login password
 CRYPTO_PRIVATE_KEY=cdpi-poc-crypto-key-change-me
 NATS_AUTH_TYPE=none
 ELK_LOG=false
 APP_PROTOCOL=http
 ```
+
+> **Redis note**: in this PoC, keep `REDIS_PASSWORD` empty. The bundled `issuance` worker uses Bull with `host` + `port` only and does not send a Redis password, so enabling `requirepass` causes the repeated `NOAUTH Authentication required` errors seen in `docker compose logs issuance`.
 
 > **Password character restriction**: Do NOT use `@`, `-`, or any character outside `[A-Za-z0-9]` in passwords or access keys. The `schema-file-server` (Deno) and `minio-setup` containers decode several env vars as base64 internally, and special characters cause an `InvalidCharacterError` crash. Use `openssl rand -hex 16` (hex output, always safe) for passwords and `openssl rand -base64 32` for `JWT_TOKEN_SECRET` (which is explicitly base64-decoded).
 
@@ -270,16 +273,16 @@ See `docs/test-flows.md` for step-by-step curl commands to test:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| **Studio (web UI)** | `http://VPS_IP:3000` | Initial login: `admin@cdpi-poc.local` / `changeme` |
+| **Studio (web UI)** | `http://VPS_IP:3000` | Initial login: `admin@cdpi-poc.local` / value of `PLATFORM_ADMIN_INITIAL_PASSWORD` (default: `changeme`) |
 | CREDEBL API | `http://VPS_IP:5000` | JWT from `POST /v1/auth/signin` (password must be encrypted like Studio does) |
 | Keycloak Console | `http://VPS_IP:8080` | `master` realm → `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` |
 | MinIO Console | `http://VPS_IP:9001` | MINIO_ROOT_USER / PASSWORD |
 | Mailpit (email) | `http://VPS_IP:8025` | No auth |
 | Schema Server | `http://VPS_IP:4000` | No auth |
 
-> **Studio first-login note**: Studio authenticates with the seeded platform user `admin@cdpi-poc.local` / `changeme` — **not** with the Keycloak master admin password. The bundled `keycloak-realm.json` already registers `http://YOUR_VPS_IP:3000/*` as a valid redirect URI. If you access Studio from a different address (e.g. a domain), add the redirect URI in Keycloak Console → `credebl-realm` → Clients → `credebl-client` → Valid redirect URIs.
+> **Studio first-login note**: Studio authenticates with the seeded platform user `admin@cdpi-poc.local` and the value of `PLATFORM_ADMIN_INITIAL_PASSWORD` (default: `changeme`) — **not** with the Keycloak master admin password. The bundled `keycloak-realm.json` already registers `http://YOUR_VPS_IP:3000/*` as a valid redirect URI. If you access Studio from a different address (e.g. a domain), add the redirect URI in Keycloak Console → `credebl-realm` → Clients → `credebl-client` → Valid redirect URIs.
 >
-> **Existing VPS note**: if Studio still returns `401` with `Something went wrong!`, the usual cause is that the platform admin DB record is not linked to the Keycloak user yet (`keycloakUserId` is null). Run `bash ../scripts/fix-credebl-studio-login.sh` from the `credebl/` folder and then retry the Studio login.
+> **Fresh-install note**: `docker compose up -d` now runs the one-shot `platform-admin-bootstrap` service after `seed` to ensure the Keycloak user exists, its password is set, and the Postgres record gets the correct `keycloakUserId`. The manual `bash ../scripts/fix-credebl-studio-login.sh` step is only for repairing older VPS deployments that were created before this change.
 
 ---
 

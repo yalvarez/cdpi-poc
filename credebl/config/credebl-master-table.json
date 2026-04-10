@@ -187,7 +187,7 @@
   ],
   "_notes": {
     "seed_compatibility": "This file intentionally mirrors the upstream CREDEBL seed schema. Do not prune the top-level keys unless you also update the seed container code.",
-    "default_platform_login": "Legacy note: `changeme` is only the encrypted seed placeholder. In the current self-contained Keycloak-backed PoC, sign in as admin@cdpi-poc.local using the value of KEYCLOAK_ADMIN_PASSWORD from .env.",
+    "default_platform_login": "Initial Studio login uses admin@cdpi-poc.local and PLATFORM_ADMIN_INITIAL_PASSWORD (default: changeme). The compose bootstrap sync service automatically links the seeded DB user to the Keycloak user on fresh installs.",
     "public_host_placeholder": "Replace YOUR_VPS_IP with the real public IP or DNS name before first deploy so the seeded platform config and issuance links point to the correct host."
   }
 }

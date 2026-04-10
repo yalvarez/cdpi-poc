@@ -59,13 +59,16 @@ services:
     image: redis:7.4-alpine
     container_name: credebl-redis
     restart: unless-stopped
-    command: redis-server --save 20 1 --loglevel warning --requirepass ${REDIS_PASSWORD}
+    # Keep Redis auth disabled in the self-contained PoC. Upstream CREDEBL's
+    # Bull queue workers (including `issuance`) connect with host/port only and
+    # do not pass REDIS_PASSWORD, which causes repeated `NOAUTH Authentication required` errors.
+    command: redis-server --save 20 1 --loglevel warning
     volumes:
       - redis_data:/data
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -261,6 +264,32 @@ services:
     networks:
       - credebl-net
 
+  # ── Platform admin bootstrap sync ───────────────────────────────────────────
+  platform-admin-bootstrap:
+    image: postgres:16-alpine
+    container_name: credebl-platform-admin-bootstrap
+    restart: "no"
+    env_file: .env
+    entrypoint:
+      - /bin/sh
+      - -c
+      - apk add --no-cache curl jq >/dev/null && /bin/sh /work/bootstrap-platform-admin.sh
+    volumes:
+      - ../scripts/bootstrap-platform-admin.sh:/work/bootstrap-platform-admin.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
   # ── API Gateway ─────────────────────────────────────────────────────────────
   api-gateway:
     image: ghcr.io/credebl/api-gateway:latest
@@ -355,6 +384,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      platform-admin-bootstrap:
+        condition: service_completed_successfully
     networks:
       - credebl-net
     deploy:
@@ -373,6 +404,8 @@ services:
         condition: service_healthy
       api-gateway:
         condition: service_healthy
+      platform-admin-bootstrap:
+        condition: service_completed_successfully
     networks:
       - credebl-net
     deploy:

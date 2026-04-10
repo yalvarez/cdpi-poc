@@ -21,7 +21,7 @@ set +a
 : "${POSTGRES_USER:?Missing POSTGRES_USER in .env}"
 : "${POSTGRES_DB:?Missing POSTGRES_DB in .env}"
 
-PLATFORM_ADMIN_PASSWORD="${1:-changeme}"
+PLATFORM_ADMIN_PASSWORD="${1:-${PLATFORM_ADMIN_INITIAL_PASSWORD:-changeme}}"
 
 parse_user_json() {
   python3 - "$1" <<'PY'

@@ -161,7 +161,7 @@ bash ../scripts/health-check-inji.sh
 
 ## Important — before first deploy
 
-**CREDEBL**: The `seed` service requires the full upstream-style `credebl-master-table.json` in `credebl/config/`. Do not reduce it to only ledger rows or `org_agents_type` entries — the `credebl-seed` container also expects keys such as `orgRoleData`, `agentTypeData`, `platformAdminData`, and `ledgerConfig`. The bundled `keycloak-realm.json` also pre-defines the `adminClient` bootstrap client with realm-management admin rights so a fresh deployment does not require manual post-import Keycloak commands.
+**CREDEBL**: The `seed` service requires the full upstream-style `credebl-master-table.json` in `credebl/config/`. Do not reduce it to only ledger rows or `org_agents_type` entries — the `credebl-seed` container also expects keys such as `orgRoleData`, `agentTypeData`, `platformAdminData`, and `ledgerConfig`. The bundled `keycloak-realm.json` pre-defines the `adminClient` bootstrap client with realm-management admin rights, and the one-shot `platform-admin-bootstrap` service automatically synchronizes the seeded `admin@cdpi-poc.local` account into Keycloak/Postgres on a fresh deployment so Studio login works without manual repair.
 
 **INJI**: Always set `export DOCKER_DEFAULT_PLATFORM=linux/amd64` — images have no ARM64 build.  
 Run `generate-inji-certs.sh` before first deploy to create the required keystore.

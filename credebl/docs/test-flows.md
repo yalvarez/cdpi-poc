@@ -17,11 +17,11 @@ BASE="http://$VPS_IP:5000"
 
 # 1. Login and get token
 # Initial Studio login uses the seeded platform admin account.
-# Default credentials: admin@cdpi-poc.local / changeme
+# Default credentials: admin@cdpi-poc.local / value of PLATFORM_ADMIN_INITIAL_PASSWORD (defaults to changeme)
 STUDIO="http://$VPS_IP:3000"
 ENC_PASSWORD=$(curl -s -X POST "$STUDIO/api/encrypt" \
   -H "Content-Type: application/json" \
-  -d "{\"password\":\"${ADMIN_PASSWORD:-changeme}\"}" \
+  -d "{\"password\":\"${ADMIN_PASSWORD:-${PLATFORM_ADMIN_INITIAL_PASSWORD:-changeme}}\"}" \
   | jq -r '.data')
 TOKEN=$(curl -s -X POST "$BASE/v1/auth/signin" \
   -H "Content-Type: application/json" \
