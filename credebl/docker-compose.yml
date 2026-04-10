@@ -272,7 +272,7 @@ services:
       seed:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --tries=1 -T 5 -O /dev/null http://localhost:5000/ 2>/tmp/wh; [ $$? -eq 0 ] || grep -q 'returned error' /tmp/wh"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5000/',(r)=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 10s
       retries: 10
