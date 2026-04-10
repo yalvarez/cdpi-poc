@@ -16,12 +16,17 @@ VPS_IP="YOUR_VPS_IP"  # replace with your actual VPS IP
 BASE="http://$VPS_IP:5000"
 
 # 1. Login and get token
-# Initial admin login uses the same value you set for KEYCLOAK_ADMIN_PASSWORD in .env.
-# Example: export ADMIN_PASSWORD='your-keycloak-admin-password'
-TOKEN=$(curl -s -X POST "$BASE/auth/login" \
+# Initial Studio login uses the seeded platform admin account.
+# Default credentials: admin@cdpi-poc.local / changeme
+STUDIO="http://$VPS_IP:3000"
+ENC_PASSWORD=$(curl -s -X POST "$STUDIO/api/encrypt" \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"admin@cdpi-poc.local\",\"password\":\"${ADMIN_PASSWORD:-CHANGE_ME_TO_KEYCLOAK_ADMIN_PASSWORD}\"}" \
-  | jq -r '.access_token')
+  -d "{\"password\":\"${ADMIN_PASSWORD:-changeme}\"}" \
+  | jq -r '.data')
+TOKEN=$(curl -s -X POST "$BASE/v1/auth/signin" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"admin@cdpi-poc.local\",\"password\":\"${ENC_PASSWORD}\"}" \
+  | jq -r '.data.access_token')
 
 echo "Token: ${TOKEN:0:40}..."  # Should show a JWT prefix
 ```
@@ -272,12 +277,15 @@ check "API gateway responding" "$HEALTH" '.status == "ok" or .status == "healthy
 
 echo ""
 echo "── Authentication ──"
-LOGIN=$(curl -s -X POST "$BASE/auth/login" \
+ENC_PASSWORD=$(curl -s -X POST "http://$VPS_IP:3000/api/encrypt" \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"admin@cdpi-poc.local\",\"password\":\"${ADMIN_PASSWORD:-CHANGE_ME_TO_KEYCLOAK_ADMIN_PASSWORD}\"}" | jq .)
+  -d "{\"password\":\"${ADMIN_PASSWORD:-CHANGE_ME_TO_KEYCLOAK_ADMIN_PASSWORD}\"}" | jq -r '.data')
+LOGIN=$(curl -s -X POST "$BASE/v1/auth/signin" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"admin@cdpi-poc.local\",\"password\":\"${ENC_PASSWORD}\"}" | jq .)
 # ADMIN_PASSWORD should match KEYCLOAK_ADMIN_PASSWORD from .env for the bundled platform-admin user.
-check "Login returns token" "$LOGIN" '.access_token | length > 0'
-TOKEN=$(echo $LOGIN | jq -r '.access_token')
+check "Login returns token" "$LOGIN" '.data.access_token | length > 0'
+TOKEN=$(echo $LOGIN | jq -r '.data.access_token')
 
 echo ""
 echo "── Organization listing ──"

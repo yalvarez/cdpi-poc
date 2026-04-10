@@ -50,7 +50,7 @@
       "secret": "${KEYCLOAK_CLIENT_SECRET}",
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": true,
       "publicClient": false,
       "protocol": "openid-connect",
@@ -88,7 +88,7 @@
   },
   "users": [
     {
-      "username": "platform-admin",
+      "username": "admin@cdpi-poc.local",
       "email": "admin@cdpi-poc.local",
       "enabled": true,
       "emailVerified": true,
@@ -97,7 +97,7 @@
       "credentials": [
         {
           "type": "password",
-          "value": "${KEYCLOAK_ADMIN_PASSWORD}",
+          "value": "changeme",
           "temporary": false
         }
       ],

@@ -270,14 +270,16 @@ See `docs/test-flows.md` for step-by-step curl commands to test:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| **Studio (web UI)** | `http://VPS_IP:3000` | Initial login: `admin@cdpi-poc.local` / value of `KEYCLOAK_ADMIN_PASSWORD` |
-| CREDEBL API | `http://VPS_IP:5000` | JWT (from `/auth/login` using the same password) |
-| Keycloak Console | `http://VPS_IP:8080` | KEYCLOAK_ADMIN_USER / PASSWORD |
+| **Studio (web UI)** | `http://VPS_IP:3000` | Initial login: `admin@cdpi-poc.local` / `changeme` |
+| CREDEBL API | `http://VPS_IP:5000` | JWT from `POST /v1/auth/signin` (password must be encrypted like Studio does) |
+| Keycloak Console | `http://VPS_IP:8080` | `master` realm → `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` |
 | MinIO Console | `http://VPS_IP:9001` | MINIO_ROOT_USER / PASSWORD |
 | Mailpit (email) | `http://VPS_IP:8025` | No auth |
 | Schema Server | `http://VPS_IP:4000` | No auth |
 
-> **Studio first-login note**: Studio authenticates via Keycloak. The bundled `keycloak-realm.json` already registers `http://YOUR_VPS_IP:3000/*` as a valid redirect URI. If you access Studio from a different address (e.g. a domain), add the redirect URI in Keycloak Console → `credebl-realm` → Clients → `credebl-client` → Valid redirect URIs.
+> **Studio first-login note**: Studio authenticates with the seeded platform user `admin@cdpi-poc.local` / `changeme` — **not** with the Keycloak master admin password. The bundled `keycloak-realm.json` already registers `http://YOUR_VPS_IP:3000/*` as a valid redirect URI. If you access Studio from a different address (e.g. a domain), add the redirect URI in Keycloak Console → `credebl-realm` → Clients → `credebl-client` → Valid redirect URIs.
+>
+> **Existing VPS note**: if Studio still returns `401` with `Something went wrong!`, the usual cause is that the platform admin DB record is not linked to the Keycloak user yet (`keycloakUserId` is null). Run `bash ../scripts/fix-credebl-studio-login.sh` from the `credebl/` folder and then retry the Studio login.
 
 ---
 

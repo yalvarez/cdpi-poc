@@ -32,6 +32,13 @@ echo ""
 
 cd "$(dirname "$0")/../credebl" 2>/dev/null || cd credebl 2>/dev/null || true
 
+if [ -f .env ]; then
+  # shellcheck disable=SC1091
+  set -a; . ./.env; set +a
+fi
+
+KEYCLOAK_REALM_CHECK=${KEYCLOAK_REALM:-credebl-realm}
+
 echo "── Infrastructure ──────────────────────────────────────────"
 check "postgres"   "docker compose ps postgres | grep -q '(healthy)'"
 check "redis"      "docker compose ps redis | grep -q '(healthy)'"
@@ -56,8 +63,8 @@ check "schema-file-server" "docker compose ps schema-file-server | grep -q 'runn
 
 echo ""
 echo "── Endpoints ───────────────────────────────────────────────"
-check "API Gateway HTTP" "curl -sf http://localhost:5000/health"
-check "Keycloak HTTP"    "curl -sf http://localhost:8080/health/ready"
+check "API Gateway HTTP" "curl -sf http://localhost:5000/api-json | grep -q 'openapi'"
+check "Keycloak HTTP"    "curl -sf http://localhost:8080/realms/${KEYCLOAK_REALM_CHECK}/.well-known/openid-configuration | grep -q 'issuer'"
 check "MinIO HTTP"       "curl -sf http://localhost:9000/minio/health/live"
 check "Mailpit HTTP"     "curl -sf http://localhost:8025"
 check "Schema server"    "curl -sf http://localhost:4000"
