@@ -133,6 +133,69 @@ ensure_alnum() {
   fi
 }
 
+wait_for_container_state() {
+  local container_name="$1"
+  local expected_pattern="$2"
+  local attempts="${3:-60}"
+  local current_state=""
+  local i=1
+
+  while [ "$i" -le "$attempts" ]; do
+    current_state="$(docker inspect --format='{{.State.Status}} {{.State.ExitCode}}' "$container_name" 2>/dev/null || true)"
+    if printf '%s' "$current_state" | grep -Eqi "$expected_pattern"; then
+      return 0
+    fi
+    sleep 2
+    i=$((i + 1))
+  done
+
+  return 1
+}
+
+platform_admin_shared_agent_ready() {
+  docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -Atqc "
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM organisation o
+        JOIN org_agents oa ON oa.\"orgId\" = o.id
+        WHERE o.name = 'Platform-admin'
+          AND oa.\"agentSpinUpStatus\" = 2
+          AND COALESCE(oa.\"agentEndPoint\", '') <> ''
+      ) THEN 'ready' ELSE 'not-ready' END;
+    " 2>/dev/null | grep -q '^ready$'
+}
+
+ensure_platform_admin_shared_agent() {
+  echo
+  echo "Ensuring platform-admin shared agent is initialized..."
+
+  if ! wait_for_container_state "credebl-platform-admin-bootstrap" '^exited 0$' 90; then
+    echo "Error: platform-admin-bootstrap did not complete successfully." >&2
+    echo "Inspect with: docker compose logs --tail=200 platform-admin-bootstrap" >&2
+    return 1
+  fi
+
+  local attempt=1
+  local max_attempts=12
+  while [ "$attempt" -le "$max_attempts" ]; do
+    if platform_admin_shared_agent_ready; then
+      echo "Platform-admin shared agent is ready."
+      return 0
+    fi
+
+    echo "  Shared agent not ready yet (attempt $attempt/$max_attempts). Restarting agent services..."
+    docker compose up -d cloud-wallet >/dev/null
+    docker compose restart agent-provisioning agent-service >/dev/null
+    sleep 10
+    attempt=$((attempt + 1))
+  done
+
+  echo "Error: platform-admin shared agent did not reach DID_CREATED state." >&2
+  echo "Inspect with: docker compose logs --tail=200 agent-service agent-provisioning" >&2
+  return 1
+}
+
 DEFAULT_HOST="$(curl -4 -fsS ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
 DEFAULT_HOST="$(sanitize_host "$DEFAULT_HOST")"
 DEFAULT_PROTOCOL="http"
@@ -217,6 +280,7 @@ VPS_IP="$PUBLIC_HOST"
 PLATFORM_WEB_URL="${PROTOCOL}://${PUBLIC_HOST}:5000"
 FRONT_END_URL="$PLATFORM_WEB_URL"
 STUDIO_URL="${PROTOCOL}://${PUBLIC_HOST}:3000"
+SOCKET_HOST="$PLATFORM_WEB_URL"
 ENABLE_CORS_IP_LIST="${STUDIO_URL},http://localhost:3000,http://127.0.0.1:3000,https://localhost:3000,https://127.0.0.1:3000"
 APP_PROTOCOL="$PROTOCOL"
 AGENT_PROTOCOL="http"
@@ -239,7 +303,7 @@ export ENV_TEMPLATE ENV_FILE MASTER_TABLE \
   KEYCLOAK_CLIENT_SECRET KEYCLOAK_MANAGEMENT_CLIENT_SECRET PLATFORM_ADMIN_KEYCLOAK_SECRET \
   PLATFORM_ADMIN_INITIAL_PASSWORD PLATFORM_SEED PLATFORM_WALLET_NAME PLATFORM_WALLET_PASSWORD \
   AGENT_API_KEY JWT_SECRET NEXTAUTH_SECRET API_ENDPOINT VPS_IP \
-  PLATFORM_WEB_URL FRONT_END_URL STUDIO_URL ENABLE_CORS_IP_LIST APP_PROTOCOL AGENT_PROTOCOL \
+  PLATFORM_WEB_URL FRONT_END_URL STUDIO_URL SOCKET_HOST ENABLE_CORS_IP_LIST APP_PROTOCOL AGENT_PROTOCOL \
   MINIO_ROOT_PASSWORD AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY JWT_TOKEN_SECRET \
   PLATFORM_ADMIN_EMAIL PUBLIC_PLATFORM_SUPPORT_EMAIL CRYPTO_PRIVATE_KEY PUBLIC_HOST PROTOCOL \
   WALLET_STORAGE_HOST WALLET_STORAGE_PORT WALLET_STORAGE_USER WALLET_STORAGE_PASSWORD
@@ -282,6 +346,7 @@ replacements = {
     'PLATFORM_WEB_URL': os.environ['PLATFORM_WEB_URL'],
     'FRONT_END_URL': os.environ['FRONT_END_URL'],
     'STUDIO_URL': os.environ['STUDIO_URL'],
+    'SOCKET_HOST': os.environ['SOCKET_HOST'],
     'ENABLE_CORS_IP_LIST': os.environ['ENABLE_CORS_IP_LIST'],
     'APP_PROTOCOL': os.environ['APP_PROTOCOL'],
     'MINIO_ROOT_PASSWORD': os.environ['MINIO_ROOT_PASSWORD'],
@@ -331,6 +396,9 @@ docker compose pull
 echo
 echo "Starting the stack..."
 docker compose up -d --build
+
+echo
+ensure_platform_admin_shared_agent
 
 echo
 echo "Running health check..."

@@ -23,6 +23,20 @@ check() {
   fi
 }
 
+platform_admin_shared_agent_ready() {
+  docker compose exec -T postgres env PGPASSWORD="${POSTGRES_PASSWORD:-}" \
+    psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -Atqc "
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM organisation o
+        JOIN org_agents oa ON oa.\"orgId\" = o.id
+        WHERE o.name = 'Platform-admin'
+          AND oa.\"agentSpinUpStatus\" = 2
+          AND COALESCE(oa.\"agentEndPoint\", '') <> ''
+      ) THEN 'ready' ELSE 'not-ready' END;
+    " | grep -q '^ready$'
+}
+
 echo ""
 echo "============================================================"
 echo " CDPI PoC — Health Check"
@@ -66,6 +80,8 @@ check "agent-provisioning" "docker compose ps agent-provisioning | grep -q 'runn
 check "agent-service"      "docker compose ps agent-service | grep -q 'running\|Up'"
 check "cloud-wallet"       "docker compose ps cloud-wallet | grep -q 'running\|Up'"
 check "schema-file-server" "docker compose ps schema-file-server | grep -q 'running\|Up'"
+check "shared-wallet envs" "[ -n \"${PLATFORM_WALLET_PASSWORD:-}\" ] && [ -n \"${AGENT_API_KEY:-}\" ] && [ -n \"${WALLET_STORAGE_PASSWORD:-}\" ] && [ -n \"${SOCKET_HOST:-}\" ]"
+check "platform-admin shared agent" "platform_admin_shared_agent_ready"
 
 echo ""
 echo "── Endpoints ───────────────────────────────────────────────"

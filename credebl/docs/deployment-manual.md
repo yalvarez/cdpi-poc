@@ -375,12 +375,19 @@ The shared-wallet path depends on these `.env` values being present and consiste
 Fix:
 ```bash
 cd credebl
-grep -E '^(PLATFORM_WALLET_NAME|PLATFORM_WALLET_PASSWORD|AGENT_API_KEY|WALLET_STORAGE_HOST|WALLET_STORAGE_PORT|WALLET_STORAGE_USER|WALLET_STORAGE_PASSWORD)=' .env
+grep -E '^(PLATFORM_WALLET_NAME|PLATFORM_WALLET_PASSWORD|AGENT_API_KEY|WALLET_STORAGE_HOST|WALLET_STORAGE_PORT|WALLET_STORAGE_USER|WALLET_STORAGE_PASSWORD|SOCKET_HOST)=' .env
 
 docker compose up -d --force-recreate agent-provisioning agent-service cloud-wallet
 
 docker compose logs --tail=200 agent-service
 docker compose logs --tail=200 agent-provisioning
+
+docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "
+    SELECT o.name, oa.\"agentSpinUpStatus\", oa.\"agentEndPoint\"
+    FROM organisation o
+    JOIN org_agents oa ON oa.\"orgId\" = o.id
+    WHERE o.name = 'Platform-admin';"
 ```
 
 Look for errors mentioning:
@@ -388,7 +395,7 @@ Look for errors mentioning:
 - `Error while creating the wallet`
 - missing wallet storage or API key values
 
-Expected result: the platform-admin shared agent initializes successfully, and retrying **Create Shared Wallet** in Studio stops returning the `create-tenant` 500.
+Expected result: the `Platform-admin` row shows `agentSpinUpStatus = 2` with a non-empty `agentEndPoint`, and retrying **Create Shared Wallet** in Studio stops returning the `create-tenant` 500.
 
 ### schema-file-server keeps restarting (`InvalidCharacterError: Failed to decode base64`)
 

@@ -392,6 +392,8 @@ services:
         condition: service_healthy
       platform-admin-bootstrap:
         condition: service_completed_successfully
+      agent-service:
+        condition: service_started
     networks:
       - credebl-net
     deploy:
@@ -606,6 +608,7 @@ services:
       WALLET_STORAGE_PASSWORD: ${POSTGRES_PASSWORD}
       AGENT_PROTOCOL: ${AGENT_PROTOCOL:-http}
       AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey}
+      SOCKET_HOST: ${SOCKET_HOST:-http://api-gateway:5000}
     command: >
       sh -c 'until (docker logs credebl-agent-provisioning 2>&1 | grep "Agent-Provisioning-Service Microservice is listening to NATS"); do sleep 2; done && node dist/apps/agent-service/main.js'
     volumes:
@@ -613,7 +616,10 @@ services:
       - agent_config:/app/agent-provisioning/AFJ/agent-config
       - agent_token:/app/agent-provisioning/AFJ/token
     depends_on:
-      - agent-provisioning
+      agent-provisioning:
+        condition: service_started
+      platform-admin-bootstrap:
+        condition: service_completed_successfully
     networks:
       - credebl-net
     deploy:
