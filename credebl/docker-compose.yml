@@ -573,6 +573,7 @@ services:
     environment:
       ROOT_PATH: /app/agent-provisioning/AFJ/agent-config
       AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey}
+      INBOUND_PORT_START: ${INBOUND_PORT_START:-9100}
       AFJ_VERSION: ${AFJ_VERSION:-ghcr.io/credebl/credo-controller:latest}
       AFJ_AGENT_SPIN_UP: ${AFJ_AGENT_SPIN_UP:-/agent-provisioning/AFJ/scripts/docker_start_agent.sh}
       AFJ_AGENT_ENDPOINT_PATH: ${AFJ_AGENT_ENDPOINT_PATH:-/agent-provisioning/AFJ/endpoints/}
