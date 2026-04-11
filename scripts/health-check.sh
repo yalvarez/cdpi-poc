@@ -36,7 +36,41 @@ platform_admin_shared_agent_ready() {
       ) THEN 'ready' ELSE 'not-ready' END;
     " | grep -q '^ready$'
 }
+platform_config_host_format_ok() {
+  docker compose exec -T postgres env PGPASSWORD="${POSTGRES_PASSWORD:-}" \
+    psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -Atqc "
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM platform_config
+        WHERE COALESCE(\"externalIp\", '') <> ''
+          AND COALESCE(\"inboundEndpoint\", '') <> ''
+          AND \"externalIp\" NOT LIKE 'http%'
+          AND \"inboundEndpoint\" NOT LIKE 'http%'
+      ) THEN 'ok' ELSE 'bad' END;
+    " | grep -q '^ok$'
+}
 
+agent_runtime_envs_ok() {
+  docker compose exec -T agent-service sh -ec '
+    [ -n "${PLATFORM_WALLET_NAME:-}" ] &&
+    [ -n "${PLATFORM_WALLET_PASSWORD:-}" ] &&
+    [ -n "${AGENT_API_KEY:-}" ] &&
+    [ -n "${WALLET_STORAGE_HOST:-}" ] &&
+    [ -n "${WALLET_STORAGE_PORT:-}" ] &&
+    [ -n "${WALLET_STORAGE_USER:-}" ] &&
+    [ -n "${WALLET_STORAGE_PASSWORD:-}" ] &&
+    [ -n "${SOCKET_HOST:-}" ]
+  '
+}
+
+agent_provisioning_runtime_ok() {
+  docker compose exec -T agent-provisioning sh -ec '
+    [ -n "${ROOT_PATH:-}" ] &&
+    [ -n "${AFJ_AGENT_SPIN_UP:-}" ] &&
+    [ -n "${AFJ_AGENT_ENDPOINT_PATH:-}" ] &&
+    [ -S /var/run/docker.sock ]
+  '
+}
 echo ""
 echo "============================================================"
 echo " CDPI PoC — Health Check"
@@ -81,6 +115,9 @@ check "agent-service"      "docker compose ps agent-service | grep -q 'running\|
 check "cloud-wallet"       "docker compose ps cloud-wallet | grep -q 'running\|Up'"
 check "schema-file-server" "docker compose ps schema-file-server | grep -q 'running\|Up'"
 check "shared-wallet envs" "[ -n \"${PLATFORM_WALLET_PASSWORD:-}\" ] && [ -n \"${AGENT_API_KEY:-}\" ] && [ -n \"${WALLET_STORAGE_PASSWORD:-}\" ] && [ -n \"${SOCKET_HOST:-}\" ]"
+check "platform-config host format" "platform_config_host_format_ok"
+check "agent runtime envs" "agent_runtime_envs_ok"
+check "agent-provisioning runtime" "agent_provisioning_runtime_ok"
 check "platform-admin shared agent" "platform_admin_shared_agent_ready"
 
 echo ""
