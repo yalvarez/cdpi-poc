@@ -237,7 +237,7 @@ ensure_platform_admin_shared_agent() {
 
   echo "Error: platform-admin shared agent did not reach DID_CREATED state." >&2
   echo "Inspect with: docker compose logs --tail=200 agent-service agent-provisioning" >&2
-  echo "Verify runtime envs with: docker compose exec agent-service sh -lc 'env | grep -E \"^(PLATFORM_WALLET_NAME|PLATFORM_WALLET_PASSWORD|AGENT_API_KEY|WALLET_STORAGE_HOST|WALLET_STORAGE_PORT|WALLET_STORAGE_USER|WALLET_STORAGE_PASSWORD|SOCKET_HOST)=\"'" >&2
+  echo "Verify runtime envs with: docker compose exec agent-service sh -lc 'env | grep -E \"^(PLATFORM_WALLET_NAME|PLATFORM_WALLET_PASSWORD|AGENT_API_KEY|WALLET_STORAGE_HOST|WALLET_STORAGE_PORT|WALLET_STORAGE_USER|WALLET_STORAGE_PASSWORD|SOCKET_HOST|AGENT_PROTOCOL|AFJ_VERSION)=\"'" >&2
   echo "Verify platform_config with: docker compose exec -T postgres env PGPASSWORD=\"$POSTGRES_PASSWORD\" psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -Atqc 'SELECT \"externalIp\",\"inboundEndpoint\",\"apiEndpoint\" FROM platform_config LIMIT 1;'" >&2
   return 1
 }

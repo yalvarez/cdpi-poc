@@ -573,6 +573,7 @@ services:
     environment:
       ROOT_PATH: /app/agent-provisioning/AFJ/agent-config
       AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey}
+      AFJ_VERSION: ${AFJ_VERSION:-ghcr.io/credebl/credo-controller:latest}
       AFJ_AGENT_SPIN_UP: ${AFJ_AGENT_SPIN_UP:-/agent-provisioning/AFJ/scripts/docker_start_agent.sh}
       AFJ_AGENT_ENDPOINT_PATH: ${AFJ_AGENT_ENDPOINT_PATH:-/agent-provisioning/AFJ/endpoints/}
     volumes:
@@ -611,6 +612,7 @@ services:
       WALLET_STORAGE_PASSWORD: ${POSTGRES_PASSWORD}
       AGENT_PROTOCOL: ${AGENT_PROTOCOL:-http}
       AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey}
+      AFJ_VERSION: ${AFJ_VERSION:-ghcr.io/credebl/credo-controller:latest}
       SOCKET_HOST: ${SOCKET_HOST:-http://api-gateway:5000}
     command: >
       sh -ec '
@@ -622,6 +624,7 @@ services:
         : "${WALLET_STORAGE_USER:?WALLET_STORAGE_USER is required}";
         : "${WALLET_STORAGE_PASSWORD:?WALLET_STORAGE_PASSWORD is required}";
         : "${SOCKET_HOST:?SOCKET_HOST is required}";
+        : "${AFJ_VERSION:?AFJ_VERSION is required}";
         until (docker logs credebl-agent-provisioning 2>&1 | grep "Agent-Provisioning-Service Microservice is listening to NATS"); do sleep 2; done;
         node dist/apps/agent-service/main.js
       '

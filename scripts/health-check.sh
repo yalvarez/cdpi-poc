@@ -59,7 +59,9 @@ agent_runtime_envs_ok() {
     [ -n "${WALLET_STORAGE_PORT:-}" ] &&
     [ -n "${WALLET_STORAGE_USER:-}" ] &&
     [ -n "${WALLET_STORAGE_PASSWORD:-}" ] &&
-    [ -n "${SOCKET_HOST:-}" ]
+    [ -n "${SOCKET_HOST:-}" ] &&
+    [ -n "${AGENT_PROTOCOL:-}" ] &&
+    [ -n "${AFJ_VERSION:-}" ]
   '
 }
 
@@ -68,6 +70,8 @@ agent_provisioning_runtime_ok() {
     [ -n "${ROOT_PATH:-}" ] &&
     [ -n "${AFJ_AGENT_SPIN_UP:-}" ] &&
     [ -n "${AFJ_AGENT_ENDPOINT_PATH:-}" ] &&
+    [ -n "${AFJ_VERSION:-}" ] &&
+    command -v docker-compose >/dev/null 2>&1 &&
     [ -S /var/run/docker.sock ]
   '
 }

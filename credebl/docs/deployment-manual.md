@@ -71,6 +71,7 @@ PLATFORM_WALLET_NAME=platformadminwallet
 PLATFORM_WALLET_PASSWORD=<run: openssl rand -hex 16>
 AGENT_API_KEY=<run: openssl rand -hex 32>
 AGENT_PROTOCOL=http
+AFJ_VERSION=ghcr.io/credebl/credo-controller:latest
 WALLET_STORAGE_HOST=postgres
 WALLET_STORAGE_PORT=5432
 WALLET_STORAGE_USER=credebl
@@ -371,18 +372,21 @@ The shared-wallet path depends on these `.env` values being present and consiste
 - `WALLET_STORAGE_PORT`
 - `WALLET_STORAGE_USER`
 - `WALLET_STORAGE_PASSWORD` (same value as `POSTGRES_PASSWORD` in this PoC)
+- `AFJ_VERSION`
 - `AFJ_AGENT_SPIN_UP`
 - `AFJ_AGENT_ENDPOINT_PATH`
 
 Fix:
 ```bash
 cd credebl
-grep -E '^(PLATFORM_WALLET_NAME|PLATFORM_WALLET_PASSWORD|AGENT_API_KEY|WALLET_STORAGE_HOST|WALLET_STORAGE_PORT|WALLET_STORAGE_USER|WALLET_STORAGE_PASSWORD|SOCKET_HOST|AFJ_AGENT_SPIN_UP|AFJ_AGENT_ENDPOINT_PATH)=' .env
+grep -E '^(PLATFORM_WALLET_NAME|PLATFORM_WALLET_PASSWORD|AGENT_API_KEY|WALLET_STORAGE_HOST|WALLET_STORAGE_PORT|WALLET_STORAGE_USER|WALLET_STORAGE_PASSWORD|SOCKET_HOST|AGENT_PROTOCOL|AFJ_VERSION|AFJ_AGENT_SPIN_UP|AFJ_AGENT_ENDPOINT_PATH)=' .env
 
 docker compose up -d --force-recreate agent-provisioning agent-service cloud-wallet
 
 docker compose logs --tail=200 agent-service
 docker compose logs --tail=200 agent-provisioning
+
+docker compose logs --tail=200 agent-service agent-provisioning | grep -Ei 'AFJ_VERSION|docker-compose|shell script|Agent endpoint file does not exist'
 
 docker compose exec -T postgres sh -lc 'export PGPASSWORD="$POSTGRES_PASSWORD"; \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "
@@ -408,6 +412,8 @@ Look for errors mentioning:
 - `Platform admin agent is not spun up`
 - `Error while creating the wallet`
 - missing wallet storage or API key values
+- empty `AFJ_VERSION`
+- `docker-compose: not found`
 
 Expected result: the `Platform-admin` row shows `agentSpinUpStatus = 2` with a non-empty `agentEndPoint`, and retrying **Create Shared Wallet** in Studio stops returning the `create-tenant` 500.
 
