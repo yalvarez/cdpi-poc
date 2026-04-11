@@ -573,6 +573,8 @@ services:
     environment:
       ROOT_PATH: /app/agent-provisioning/AFJ/agent-config
       AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey}
+      AFJ_AGENT_SPIN_UP: ${AFJ_AGENT_SPIN_UP:-/agent-provisioning/AFJ/scripts/docker_start_agent.sh}
+      AFJ_AGENT_ENDPOINT_PATH: ${AFJ_AGENT_ENDPOINT_PATH:-/agent-provisioning/AFJ/endpoints/}
     volumes:
       - agent_config:/app/agent-provisioning/AFJ/agent-config
       - agent_token:/app/agent-provisioning/AFJ/token
