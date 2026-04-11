@@ -152,6 +152,34 @@ wait_for_container_state() {
   return 1
 }
 
+ensure_minio_setup() {
+  echo
+  echo "Ensuring MinIO buckets and access keys are initialized..."
+
+  docker compose up -d minio >/dev/null
+
+  local attempt=1
+  local max_attempts=5
+  while [ "$attempt" -le "$max_attempts" ]; do
+    docker compose rm -sf minio-setup >/dev/null 2>&1 || true
+
+    if docker compose up --no-deps minio-setup; then
+      if wait_for_container_state "credebl-minio-setup" '^exited 0$' 10; then
+        echo "MinIO setup complete."
+        return 0
+      fi
+    fi
+
+    echo "  MinIO setup failed (attempt $attempt/$max_attempts). Retrying..."
+    attempt=$((attempt + 1))
+    sleep 3
+  done
+
+  echo "Error: minio-setup did not complete successfully." >&2
+  echo "Inspect with: docker compose logs --tail=200 minio-setup" >&2
+  return 1
+}
+
 platform_admin_shared_agent_ready() {
   docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
     psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -Atqc "
@@ -164,6 +192,20 @@ platform_admin_shared_agent_ready() {
           AND COALESCE(oa.\"agentEndPoint\", '') <> ''
       ) THEN 'ready' ELSE 'not-ready' END;
     " 2>/dev/null | grep -q '^ready$'
+}
+
+clear_stale_platform_admin_agent() {
+  docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -v ON_ERROR_STOP=1 -c "
+      DELETE FROM org_agents oa
+      USING organisation o
+      WHERE oa.\"orgId\" = o.id
+        AND o.name = 'Platform-admin'
+        AND (
+          oa.\"agentSpinUpStatus\" <> 2
+          OR COALESCE(oa.\"agentEndPoint\", '') = ''
+        );
+    " >/dev/null
 }
 
 ensure_platform_admin_shared_agent() {
@@ -184,7 +226,9 @@ ensure_platform_admin_shared_agent() {
       return 0
     fi
 
-    echo "  Shared agent not ready yet (attempt $attempt/$max_attempts). Restarting agent services..."
+    echo "  Shared agent not ready yet (attempt $attempt/$max_attempts)."
+    echo "  Removing any stale partial Platform-admin agent record and restarting agent services..."
+    clear_stale_platform_admin_agent || true
     docker compose up -d cloud-wallet >/dev/null
     docker compose restart agent-provisioning agent-service >/dev/null
     sleep 10
@@ -396,6 +440,9 @@ docker compose pull
 echo
 echo "Starting the stack..."
 docker compose up -d --build
+
+echo
+ensure_minio_setup
 
 echo
 ensure_platform_admin_shared_agent

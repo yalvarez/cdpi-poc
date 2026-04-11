@@ -388,6 +388,18 @@ docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
     FROM organisation o
     JOIN org_agents oa ON oa.\"orgId\" = o.id
     WHERE o.name = 'Platform-admin';"
+
+# If the row is stuck in status 1 (wallet created but DID not finished),
+# remove the stale partial record and let agent-service recreate it cleanly.
+docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+    DELETE FROM org_agents oa
+    USING organisation o
+    WHERE oa.\"orgId\" = o.id
+      AND o.name = 'Platform-admin'
+      AND (oa.\"agentSpinUpStatus\" <> 2 OR COALESCE(oa.\"agentEndPoint\", '') = '');"
+
+docker compose restart agent-provisioning agent-service
 ```
 
 Look for errors mentioning:
@@ -396,6 +408,21 @@ Look for errors mentioning:
 - missing wallet storage or API key values
 
 Expected result: the `Platform-admin` row shows `agentSpinUpStatus = 2` with a non-empty `agentEndPoint`, and retrying **Create Shared Wallet** in Studio stops returning the `create-tenant` 500.
+
+### `minio-setup` exited with failure
+
+If the health check shows `minio-setup ← FAILED`, rerun the one-shot MinIO bootstrap container:
+
+```bash
+cd credebl
+docker compose rm -sf minio-setup
+
+docker compose up --no-deps minio-setup
+
+docker inspect --format='{{.State.Status}} {{.State.ExitCode}}' credebl-minio-setup
+```
+
+Expected result: `exited 0`
 
 ### schema-file-server keeps restarting (`InvalidCharacterError: Failed to decode base64`)
 
