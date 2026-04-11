@@ -13,7 +13,7 @@ Your VPS must have:
 - Ubuntu 22.04 or 24.04 LTS
 - 4 CPU cores, 8GB RAM, 150GB disk
 - Docker Engine (installed by setup-vps.sh)
-- Ports open: 22, 80, 443, 3000, 5000, 8080, 9001, 8025, 4000
+- Ports open: 22, 80, 443, 3000, 5000, 8080, 9011, 8025, 4000
 
 If the VPS is fresh, run the setup script first:
 
@@ -308,7 +308,7 @@ See `docs/test-flows.md` for step-by-step curl commands to test:
 | **Studio (web UI)** | `http://VPS_IP:3000` | Initial login: `admin@cdpi-poc.local` / value of `PLATFORM_ADMIN_INITIAL_PASSWORD` (default: `changeme`) |
 | CREDEBL API | `http://VPS_IP:5000` | JWT from `POST /v1/auth/signin` (password must be encrypted like Studio does) |
 | Keycloak Console | `http://VPS_IP:8080` | `master` realm → `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` |
-| MinIO Console | `http://VPS_IP:9001` | MINIO_ROOT_USER / PASSWORD |
+| MinIO Console | `http://VPS_IP:9011` | MINIO_ROOT_USER / PASSWORD |
 | Mailpit (email) | `http://VPS_IP:8025` | No auth |
 | Schema Server | `http://VPS_IP:4000` | No auth |
 
