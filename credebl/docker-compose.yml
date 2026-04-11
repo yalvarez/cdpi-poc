@@ -625,8 +625,7 @@ services:
         : "${WALLET_STORAGE_PASSWORD:?WALLET_STORAGE_PASSWORD is required}";
         : "${SOCKET_HOST:?SOCKET_HOST is required}";
         : "${AFJ_VERSION:?AFJ_VERSION is required}";
-        until (docker logs credebl-agent-provisioning 2>&1 | grep "Agent-Provisioning-Service Microservice is listening to NATS"); do sleep 2; done;
-        node dist/apps/agent-service/main.js
+        sleep 5 && node dist/apps/agent-service/main.js
       '
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
