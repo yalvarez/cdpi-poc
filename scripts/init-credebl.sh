@@ -412,8 +412,9 @@ config = json.loads(master_table.read_text(encoding='utf-8'))
 platform_config = config.get('platformConfigData', {})
 protocol = os.environ['PROTOCOL']
 host = os.environ['PUBLIC_HOST']
-platform_config['externalIp'] = f'{protocol}://{host}'
-platform_config['inboundEndpoint'] = f'{protocol}://{host}'
+# CREDEBL's AFJ bootstrap scripts expect bare host/IP values here, not full URLs.
+platform_config['externalIp'] = host
+platform_config['inboundEndpoint'] = host
 platform_config['apiEndpoint'] = f'{protocol}://{host}:5000'
 config['platformConfigData'] = platform_config
 master_table.write_text(json.dumps(config, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')

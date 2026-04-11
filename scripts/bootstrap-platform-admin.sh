@@ -8,10 +8,20 @@ set -eu
 : "${POSTGRES_USER:?Missing POSTGRES_USER}"
 : "${POSTGRES_PASSWORD:?Missing POSTGRES_PASSWORD}"
 : "${POSTGRES_DB:?Missing POSTGRES_DB}"
+: "${PLATFORM_WEB_URL:?Missing PLATFORM_WEB_URL}"
 
 KEYCLOAK_BASE_URL="${KEYCLOAK_ADMIN_URL:-http://keycloak:8080}"
 KEYCLOAK_MASTER_REALM="${KEYCLOAK_MASTER_REALM:-master}"
 PLATFORM_ADMIN_INITIAL_PASSWORD="${PLATFORM_ADMIN_INITIAL_PASSWORD:-changeme}"
+PLATFORM_HOST="${VPS_IP:-}"
+
+if [ -z "$PLATFORM_HOST" ]; then
+  PLATFORM_HOST="$PLATFORM_WEB_URL"
+  PLATFORM_HOST="${PLATFORM_HOST#http://}"
+  PLATFORM_HOST="${PLATFORM_HOST#https://}"
+  PLATFORM_HOST="${PLATFORM_HOST%%/*}"
+  PLATFORM_HOST="${PLATFORM_HOST%%:*}"
+fi
 
 wait_for() {
   name="$1"
@@ -109,6 +119,11 @@ echo "==> Linking the Keycloak user id in Postgres"
 psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -v ON_ERROR_STOP=1 \
   -c "UPDATE \"user\" SET \"keycloakUserId\"='${KC_USER_ID}' WHERE email='${PLATFORM_ADMIN_EMAIL}';"
+
+echo "==> Syncing platform configuration endpoints in Postgres"
+psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -v ON_ERROR_STOP=1 \
+  -c "UPDATE platform_config SET \"externalIp\"='${PLATFORM_HOST}', \"inboundEndpoint\"='${PLATFORM_HOST}', \"apiEndpoint\"='${PLATFORM_WEB_URL}';"
 
 echo "==> Platform admin bootstrap sync completed"
 echo "    Email:    $PLATFORM_ADMIN_EMAIL"

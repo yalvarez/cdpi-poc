@@ -1,7 +1,7 @@
 {
   "platformConfigData": {
-    "externalIp": "http://YOUR_VPS_IP",
-    "inboundEndpoint": "http://YOUR_VPS_IP",
+    "externalIp": "YOUR_VPS_IP",
+    "inboundEndpoint": "YOUR_VPS_IP",
     "username": "credebl",
     "sgApiKey": "mailpit-mock",
     "emailFrom": "noreply@cdpi-poc.local",

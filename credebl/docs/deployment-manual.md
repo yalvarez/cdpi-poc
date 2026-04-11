@@ -382,22 +382,22 @@ docker compose up -d --force-recreate agent-provisioning agent-service cloud-wal
 docker compose logs --tail=200 agent-service
 docker compose logs --tail=200 agent-provisioning
 
-docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+docker compose exec -T postgres sh -lc 'export PGPASSWORD="$POSTGRES_PASSWORD"; \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "
     SELECT o.name, oa.\"agentSpinUpStatus\", oa.\"agentEndPoint\"
     FROM organisation o
     JOIN org_agents oa ON oa.\"orgId\" = o.id
-    WHERE o.name = 'Platform-admin';"
+    WHERE o.name = '\''Platform-admin'\'';"'
 
-# If the row is stuck in status 1 (wallet created but DID not finished),
+# If the row is stuck in status 1 (wallet created but DID not finish),
 # remove the stale partial record and let agent-service recreate it cleanly.
-docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+docker compose exec -T postgres sh -lc 'export PGPASSWORD="$POSTGRES_PASSWORD"; \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
     DELETE FROM org_agents oa
     USING organisation o
     WHERE oa.\"orgId\" = o.id
-      AND o.name = 'Platform-admin'
-      AND (oa.\"agentSpinUpStatus\" <> 2 OR COALESCE(oa.\"agentEndPoint\", '') = '');"
+      AND o.name = '\''Platform-admin'\''
+      AND (oa.\"agentSpinUpStatus\" <> 2 OR COALESCE(oa.\"agentEndPoint\", '') = '\'''\''');"'
 
 docker compose restart agent-provisioning agent-service
 ```
@@ -408,6 +408,10 @@ Look for errors mentioning:
 - missing wallet storage or API key values
 
 Expected result: the `Platform-admin` row shows `agentSpinUpStatus = 2` with a non-empty `agentEndPoint`, and retrying **Create Shared Wallet** in Studio stops returning the `create-tenant` 500.
+
+> If you run the SQL checks manually from a root shell, do **not** rely on host variables like `$POSTGRES_USER` unless you first source `.env`. The commands above run inside the `postgres` container so they always use the correct values.
+
+> Important: in `platform_config`, `externalIp` and `inboundEndpoint` must be the **bare host/IP** (for example `203.0.113.10`) — **not** `http://203.0.113.10`. CREDEBL's AFJ bootstrap scripts use those values to construct agent URLs during the platform-admin shared-agent startup.
 
 ### `minio-setup` exited with failure
 
