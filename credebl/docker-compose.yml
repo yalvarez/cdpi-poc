@@ -190,19 +190,19 @@ services:
       - /bin/sh
       - -ec
       - |
-        : "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
-        : "${MINIO_ACCESS_KEY:?AWS_ACCESS_KEY_ID is required}"
-        : "${MINIO_SECRET_KEY:?AWS_SECRET_ACCESS_KEY is required}"
-        mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
-        mc mb --ignore-existing "local/$MINIO_BUCKET"
-        mc mb --ignore-existing "local/$MINIO_BUCKET/default"
-        mc mb --ignore-existing "local/$MINIO_BUCKET/persist"
-        mc mb --ignore-existing "local/$MINIO_BUCKET/orgLogos"
-        mc anonymous set public "local/$MINIO_BUCKET/default"
-        mc anonymous set public "local/$MINIO_BUCKET/orgLogos"
-        mc admin user info local "$MINIO_ACCESS_KEY" >/dev/null 2>&1 || \
-          mc admin user add local "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
-        mc admin policy attach local readwrite --user "$MINIO_ACCESS_KEY"
+        : "$${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
+        : "$${MINIO_ACCESS_KEY:?AWS_ACCESS_KEY_ID is required}"
+        : "$${MINIO_SECRET_KEY:?AWS_SECRET_ACCESS_KEY is required}"
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}/default"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}/persist"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}/orgLogos"
+        mc anonymous set public "local/$${MINIO_BUCKET}/default"
+        mc anonymous set public "local/$${MINIO_BUCKET}/orgLogos"
+        mc admin user info local "$${MINIO_ACCESS_KEY}" >/dev/null 2>&1 || \
+          mc admin user add local "$${MINIO_ACCESS_KEY}" "$${MINIO_SECRET_KEY}"
+        mc admin policy attach local readwrite --user "$${MINIO_ACCESS_KEY}"
         echo 'MinIO setup complete'
     networks:
       - credebl-net
