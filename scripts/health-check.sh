@@ -120,6 +120,15 @@ schema_file_server_storage_writable() {
     [ -w /app/schemas ]
   '
 }
+
+issuance_limit_envs_ok() {
+  [ -n "${OOB_BATCH_SIZE:-}" ] &&
+  [ -n "${PROOF_REQ_CONN_LIMIT:-}" ] &&
+  printf '%s' "${OOB_BATCH_SIZE}" | grep -Eq '^[0-9]+$' &&
+  printf '%s' "${PROOF_REQ_CONN_LIMIT}" | grep -Eq '^[0-9]+$' &&
+  [ "${OOB_BATCH_SIZE}" -gt 0 ] &&
+  [ "${PROOF_REQ_CONN_LIMIT}" -gt 0 ]
+}
 echo ""
 echo "============================================================"
 echo " CDPI PoC — Health Check"
@@ -170,6 +179,7 @@ check "agent-provisioning runtime" "agent_provisioning_runtime_ok"
 check "child agent runtime file" "agent_runtime_file_ok"
 check "schema-file-server auth envs" "schema_file_server_auth_envs_ok"
 check "schema-file-server writable storage" "schema_file_server_storage_writable"
+check "issuance limit envs" "issuance_limit_envs_ok"
 check "platform-admin shared agent" "platform_admin_shared_agent_ready"
 
 echo ""
