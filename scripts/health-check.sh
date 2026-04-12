@@ -111,7 +111,7 @@ schema_file_server_auth_envs_ok() {
   [ -n "${SCHEMA_FILE_SERVER_TOKEN:-}" ] &&
   [ -n "${JWT_TOKEN_SECRET:-}" ] &&
   [ -n "${ISSUER:-}" ] &&
-  printf '%s' "${SCHEMA_FILE_SERVER_URL}" | grep -Eq '/schemas/?$'
+  printf '%s' "${SCHEMA_FILE_SERVER_URL}" | grep -Eq '/schemas/$'
 }
 
 schema_file_server_storage_writable() {
