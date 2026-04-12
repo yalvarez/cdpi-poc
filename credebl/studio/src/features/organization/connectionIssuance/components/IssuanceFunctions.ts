@@ -21,21 +21,7 @@ import { issueCredential } from '@/app/api/Issuance'
 import { pathRoutes } from '@/config/pathRoutes'
 import { store } from '@/lib/store'
 
-const isValidContextUri = (value: string | undefined): value is string =>
-  typeof value === 'string' && /^(https?:\/\/|did:|urn:)/.test(value)
-
-const buildCredentialContext = (schemaContext: string | undefined): string[] => {
-  const contexts = [CREDENTIAL_CONTEXT_VALUE]
-
-  if (
-    isValidContextUri(schemaContext) &&
-    schemaContext !== CREDENTIAL_CONTEXT_VALUE
-  ) {
-    contexts.push(schemaContext)
-  }
-
-  return contexts
-}
+const buildCredentialContext = (): string[] => [CREDENTIAL_CONTEXT_VALUE]
 
 export const handleSubmit = async ({
   values,
@@ -70,7 +56,7 @@ export const handleSubmit = async ({
       credentialData: values?.credentialData.map((item: ICredentialdata) => ({
         connectionId: item.connectionId,
         credential: {
-          '@context': buildCredentialContext(schemaDetails.schemaId),
+          '@context': buildCredentialContext(),
           type: ['VerifiableCredential', schemaDetails.schemaName],
           issuer: {
             id: orgDid,

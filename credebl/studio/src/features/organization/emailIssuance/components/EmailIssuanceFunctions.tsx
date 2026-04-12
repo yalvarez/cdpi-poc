@@ -30,21 +30,7 @@ import { getSchemaCredDef } from '@/app/api/BulkIssuance'
 import { issueOobEmailCredential } from '@/app/api/Issuance'
 import { pathRoutes } from '@/config/pathRoutes'
 
-const isValidContextUri = (value: string | undefined): value is string =>
-  typeof value === 'string' && /^(https?:\/\/|did:|urn:)/.test(value)
-
-const buildCredentialContext = (schemaContext: string | undefined): string[] => {
-  const contexts = [CREDENTIAL_CONTEXT_VALUE]
-
-  if (
-    isValidContextUri(schemaContext) &&
-    schemaContext !== CREDENTIAL_CONTEXT_VALUE
-  ) {
-    contexts.push(schemaContext)
-  }
-
-  return contexts
-}
+const buildCredentialContext = (): string[] => [CREDENTIAL_CONTEXT_VALUE]
 
 export const handleReset = ({
   setCredentialSelected,
@@ -125,7 +111,7 @@ const transformW3CData = async (
 
   const transformedData: ITransformedData = { credentialOffer: [] }
 
-  const contextValues = buildCredentialContext(schemasIdentifier)
+  const contextValues = buildCredentialContext()
 
   existingData?.formData?.forEach((entry: FormDatum) => {
     const credentialOffer = {
