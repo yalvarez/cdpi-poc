@@ -30,6 +30,22 @@ import { getSchemaCredDef } from '@/app/api/BulkIssuance'
 import { issueOobEmailCredential } from '@/app/api/Issuance'
 import { pathRoutes } from '@/config/pathRoutes'
 
+const isValidContextUri = (value: string | undefined): value is string =>
+  typeof value === 'string' && /^(https?:\/\/|did:|urn:)/.test(value)
+
+const buildCredentialContext = (schemaContext: string | undefined): string[] => {
+  const contexts = [CREDENTIAL_CONTEXT_VALUE]
+
+  if (
+    isValidContextUri(schemaContext) &&
+    schemaContext !== CREDENTIAL_CONTEXT_VALUE
+  ) {
+    contexts.push(schemaContext)
+  }
+
+  return contexts
+}
+
 export const handleReset = ({
   setCredentialSelected,
   selectInputRef,
@@ -109,10 +125,7 @@ const transformW3CData = async (
 
   const transformedData: ITransformedData = { credentialOffer: [] }
 
-  // ✅ Provide fallback for undefined schemasIdentifier
-  const contextValues = [CREDENTIAL_CONTEXT_VALUE, schemasIdentifier].filter(
-    (v): v is string => typeof v === 'string' && v !== '',
-  )
+  const contextValues = buildCredentialContext(schemasIdentifier)
 
   existingData?.formData?.forEach((entry: FormDatum) => {
     const credentialOffer = {
@@ -197,13 +210,12 @@ export const confirmOOBCredentialIssuance = async ({
       )
     }
 
-    const transformedJson = JSON.stringify(transformedData, null, 2)
     if (!credentialType) {
       return
     }
 
     const response = await issueOobEmailCredential(
-      transformedJson,
+      transformedData,
       credentialType,
       orgId,
     )
