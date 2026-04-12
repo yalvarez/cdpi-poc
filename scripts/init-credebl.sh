@@ -445,6 +445,8 @@ echo
 
 cd "$CREDEBL_DIR"
 
+mkdir -p .agent-runtime/agent-config .agent-runtime/token .agent-runtime/endpoints
+
 if ask_yes_no "Do a full clean reset first (down -v --remove-orphans)?" "Y"; then
   docker compose down -v --remove-orphans
 fi

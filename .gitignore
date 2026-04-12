@@ -13,6 +13,7 @@ inji/certs/*.crt
 # CREDEBL agent runtime data
 credebl/config/agent-config/
 credebl/config/agent-token/
+credebl/.agent-runtime/
 
 # OS
 .DS_Store
