@@ -181,17 +181,30 @@ ensure_minio_setup() {
 }
 
 platform_admin_shared_agent_ready() {
-  docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+  local row status endpoint token_url
+  row="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
     psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -Atqc "
-      SELECT CASE WHEN EXISTS (
-        SELECT 1
-        FROM organisation o
-        JOIN org_agents oa ON oa.\"orgId\" = o.id
-        WHERE o.name = 'Platform-admin'
-          AND oa.\"agentSpinUpStatus\" = 2
-          AND COALESCE(oa.\"agentEndPoint\", '') <> ''
-      ) THEN 'ready' ELSE 'not-ready' END;
-    " 2>/dev/null | grep -q '^ready$'
+      SELECT COALESCE(oa.\"agentSpinUpStatus\"::text,''), COALESCE(oa.\"agentEndPoint\", '')
+      FROM organisation o
+      LEFT JOIN org_agents oa ON oa.\"orgId\" = o.id
+      WHERE o.name = 'Platform-admin'
+      LIMIT 1;
+    " 2>/dev/null | tr -d '\r')"
+
+  status="${row%%|*}"
+  endpoint="${row#*|}"
+
+  if [ "$status" != "2" ] || [ -z "$endpoint" ] || [ "$endpoint" = "http://" ] || [ "$endpoint" = "https://" ]; then
+    return 1
+  fi
+
+  if [[ ! "$endpoint" =~ ^https?:// ]]; then
+    token_url="http://${endpoint}/agent/token"
+  else
+    token_url="${endpoint%/}/agent/token"
+  fi
+
+  curl -sf --max-time 8 -X POST -H "Authorization: $AGENT_API_KEY" "$token_url" >/dev/null
 }
 
 clear_stale_platform_admin_agent() {

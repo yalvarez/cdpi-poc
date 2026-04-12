@@ -24,17 +24,31 @@ check() {
 }
 
 platform_admin_shared_agent_ready() {
-  docker compose exec -T postgres env PGPASSWORD="${POSTGRES_PASSWORD:-}" \
+  local row status endpoint token_url
+  row="$(docker compose exec -T postgres env PGPASSWORD="${POSTGRES_PASSWORD:-}" \
     psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -Atqc "
-      SELECT CASE WHEN EXISTS (
-        SELECT 1
-        FROM organisation o
-        JOIN org_agents oa ON oa.\"orgId\" = o.id
-        WHERE o.name = 'Platform-admin'
-          AND oa.\"agentSpinUpStatus\" = 2
-          AND COALESCE(oa.\"agentEndPoint\", '') <> ''
-      ) THEN 'ready' ELSE 'not-ready' END;
-    " | grep -q '^ready$'
+      SELECT COALESCE(oa.\"agentSpinUpStatus\"::text,''), COALESCE(oa.\"agentEndPoint\", '')
+      FROM organisation o
+      LEFT JOIN org_agents oa ON oa.\"orgId\" = o.id
+      WHERE o.name = 'Platform-admin'
+      LIMIT 1;
+    " 2>/dev/null | tr -d '\r')"
+
+  status="${row%%|*}"
+  endpoint="${row#*|}"
+
+  # Reject placeholders such as empty strings or bare protocol values.
+  if [ "$status" != "2" ] || [ -z "$endpoint" ] || [ "$endpoint" = "http://" ] || [ "$endpoint" = "https://" ]; then
+    return 1
+  fi
+
+  if [[ ! "$endpoint" =~ ^https?:// ]]; then
+    token_url="http://${endpoint}/agent/token"
+  else
+    token_url="${endpoint%/}/agent/token"
+  fi
+
+  curl -sf --max-time 8 -X POST -H "Authorization: ${AGENT_API_KEY:-}" "$token_url" >/dev/null
 }
 platform_config_host_format_ok() {
   docker compose exec -T postgres env PGPASSWORD="${POSTGRES_PASSWORD:-}" \
@@ -149,7 +163,7 @@ if [ "$FAIL" -eq 0 ]; then
   echo "   Studio:         http://$VPS_IP:3000"
   echo "   CREDEBL API:    http://$VPS_IP:5000"
   echo "   Keycloak:       http://$VPS_IP:8080"
-  echo "   MinIO console:  http://$VPS_IP:9001"
+  echo "   MinIO console:  http://$VPS_IP:${MINIO_CONSOLE_PORT:-9011}"
   echo "   Email capture:  http://$VPS_IP:8025"
   echo "   Schema server:  http://$VPS_IP:4000"
 else
