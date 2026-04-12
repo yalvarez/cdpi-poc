@@ -581,7 +581,7 @@ services:
       - ${PWD}/.agent-runtime/agent-config:/app/agent-provisioning/AFJ/agent-config
       - ${PWD}/.agent-runtime/token:/app/agent-provisioning/AFJ/token
       - ${PWD}/.agent-runtime/endpoints:/app/agent-provisioning/AFJ/endpoints
-      - ./config/agent.env:/app/agent.env:ro
+      - ${PWD}/.agent-runtime/agent.env:/app/agent.env:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       nats:

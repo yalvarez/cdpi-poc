@@ -89,6 +89,30 @@ agent_provisioning_runtime_ok() {
     [ -S /var/run/docker.sock ]
   '
 }
+
+agent_runtime_file_ok() {
+  docker compose exec -T agent-provisioning sh -ec '
+    [ -f /app/agent.env ] &&
+    grep -q "^AGENT_HTTP_URL=http://" /app/agent.env &&
+    grep -q "^AGENT_WS_URL=ws://" /app/agent.env &&
+    grep -q "^CONNECT_TIMEOUT=[0-9][0-9]*$" /app/agent.env &&
+    grep -q "^MAX_CONNECTIONS=[0-9][0-9]*$" /app/agent.env &&
+    grep -q "^IDLE_TIMEOUT=[0-9][0-9]*$" /app/agent.env &&
+    grep -q "^SESSION_ACQUIRE_TIMEOUT=[0-9][0-9]*$" /app/agent.env &&
+    grep -q "^SESSION_LIMIT=[0-9][0-9]*$" /app/agent.env &&
+    grep -q "^INMEMORY_LRU_CACHE_LIMIT=[0-9][0-9]*$" /app/agent.env &&
+    grep -q "^TRUST_SERVICE_AUTH_TYPE=NoAuth$" /app/agent.env &&
+    grep -q "^TRUST_LIST_URL=https://" /app/agent.env
+  '
+}
+
+schema_file_server_auth_envs_ok() {
+  [ -n "${SCHEMA_FILE_SERVER_URL:-}" ] &&
+  [ -n "${SCHEMA_FILE_SERVER_TOKEN:-}" ] &&
+  [ -n "${JWT_TOKEN_SECRET:-}" ] &&
+  [ -n "${ISSUER:-}" ] &&
+  printf '%s' "${SCHEMA_FILE_SERVER_URL}" | grep -q '/$'
+}
 echo ""
 echo "============================================================"
 echo " CDPI PoC — Health Check"
@@ -136,6 +160,8 @@ check "shared-wallet envs" "[ -n \"${PLATFORM_WALLET_PASSWORD:-}\" ] && [ -n \"$
 check "platform-config host format" "platform_config_host_format_ok"
 check "agent runtime envs" "agent_runtime_envs_ok"
 check "agent-provisioning runtime" "agent_provisioning_runtime_ok"
+check "child agent runtime file" "agent_runtime_file_ok"
+check "schema-file-server auth envs" "schema_file_server_auth_envs_ok"
 check "platform-admin shared agent" "platform_admin_shared_agent_ready"
 
 echo ""
