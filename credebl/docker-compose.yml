@@ -572,7 +572,7 @@ services:
     env_file: .env
     environment:
       ROOT_PATH: /app/agent-provisioning/AFJ/agent-config
-      AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey}
+      AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey1234}
       INBOUND_PORT_START: ${INBOUND_PORT_START:-9100}
       AFJ_VERSION: ${AFJ_VERSION:-ghcr.io/credebl/credo-controller:latest}
       AFJ_AGENT_SPIN_UP: ${AFJ_AGENT_SPIN_UP:-/agent-provisioning/AFJ/scripts/docker_start_agent.sh}
@@ -612,7 +612,7 @@ services:
       WALLET_STORAGE_USER: ${WALLET_STORAGE_USER:-credebl}
       WALLET_STORAGE_PASSWORD: ${POSTGRES_PASSWORD}
       AGENT_PROTOCOL: ${AGENT_PROTOCOL:-http}
-      AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey}
+      AGENT_API_KEY: ${AGENT_API_KEY:-credeblagentkey1234}
       AFJ_VERSION: ${AFJ_VERSION:-ghcr.io/credebl/credo-controller:latest}
       SOCKET_HOST: ${SOCKET_HOST:-http://api-gateway:5000}
     command: >
