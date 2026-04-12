@@ -226,6 +226,9 @@ services:
   schema-file-server:
     image: ghcr.io/credebl/schema-file-server:latest
     container_name: credebl-schema-file-server
+    # Upstream image runs as uid/gid 1993 (deno), but /app/schemas is root:root 775.
+    # Run as root in this PoC so POST /schemas can persist schema files reliably.
+    user: "0:0"
     restart: unless-stopped
     env_file: .env
     environment:

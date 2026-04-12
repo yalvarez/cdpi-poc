@@ -147,9 +147,19 @@ import json
 import sys
 import time
 
-secret = sys.argv[1].encode("utf-8")
+secret_input = sys.argv[1]
 issuer = sys.argv[2]
 now = int(time.time())
+
+try:
+  # schema-file-server expects JWT_TOKEN_SECRET as base64 and validates
+  # signatures with the decoded bytes.
+  secret = base64.b64decode(secret_input, validate=True)
+  if not secret:
+    secret = secret_input.encode("utf-8")
+except Exception:
+  # Fallback for non-base64 secrets in legacy/manual setups.
+  secret = secret_input.encode("utf-8")
 
 header = {"alg": "HS256", "typ": "JWT"}
 payload = {
@@ -410,7 +420,7 @@ WALLET_STORAGE_HOST="$PUBLIC_HOST"
 WALLET_STORAGE_PORT="5432"
 WALLET_STORAGE_USER="credebl"
 WALLET_STORAGE_PASSWORD="$POSTGRES_PASSWORD"
-SCHEMA_FILE_SERVER_URL="http://schema-file-server:4000/"
+SCHEMA_FILE_SERVER_URL="http://schema-file-server:4000/schemas"
 SCHEMA_FILE_SERVER_TOKEN="$(generate_hs256_jwt "$JWT_TOKEN_SECRET" "$SCHEMA_FILE_SERVER_ISSUER")"
 
 if [ -f "$ENV_FILE" ]; then

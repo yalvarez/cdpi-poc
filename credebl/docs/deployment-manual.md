@@ -81,7 +81,7 @@ WALLET_STORAGE_PORT=5432
 WALLET_STORAGE_USER=credebl
 WALLET_STORAGE_PASSWORD=<copy POSTGRES_PASSWORD>
 JWT_SECRET=<run: openssl rand -hex 32>
-SCHEMA_FILE_SERVER_URL=http://schema-file-server:4000/
+SCHEMA_FILE_SERVER_URL=http://schema-file-server:4000/schemas
 SCHEMA_FILE_SERVER_TOKEN=<JWT signed with JWT_TOKEN_SECRET>
 ISSUER=Credebl
 JWT_TOKEN_SECRET=<run: openssl rand -base64 32>
@@ -103,7 +103,9 @@ STUDIO_URL=http://YOUR_VPS_IP:3000
 
 > **Password character restriction**: Do NOT use `@`, `-`, or any character outside `[A-Za-z0-9]` in passwords or access keys. The `schema-file-server` (Deno) and `minio-setup` containers decode several env vars as base64 internally, and special characters cause an `InvalidCharacterError` crash. Use `openssl rand -hex 16` (hex output, always safe) for passwords and `openssl rand -base64 32` for `JWT_TOKEN_SECRET` (which is explicitly base64-decoded).
 
-> **Schema file server auth**: W3C / did:web / did:key schema creation uses `SCHEMA_FILE_SERVER_URL` and `SCHEMA_FILE_SERVER_TOKEN`. The URL must end with `/`, and the token must be a JWT signed with `JWT_TOKEN_SECRET`. `scripts/init-credebl.sh` now generates that token automatically.
+> **Schema file server auth**: W3C / did:web / did:key schema creation uses `SCHEMA_FILE_SERVER_URL` and `SCHEMA_FILE_SERVER_TOKEN`. The URL must point to `http://schema-file-server:4000/schemas` (POST endpoint), and the token must be a JWT signed with `JWT_TOKEN_SECRET`. `scripts/init-credebl.sh` now generates that token automatically.
+
+> **Schema file server write permission**: some upstream `schema-file-server` image versions run as `uid=1993 (deno)` while `/app/schemas` is owned by `root:root` with mode `775`. This causes `PermissionDenied (os error 13): writefile 'schemas/<id>.json'` on schema creation. This PoC pins a runtime fix in compose: `schema-file-server` runs as `user: "0:0"`.
 
 Create the generated runtime directory before starting the stack manually:
 ```bash
@@ -483,6 +485,22 @@ echo "JWT_TOKEN_SECRET=$(openssl rand -base64 32)" >> .env
 docker compose up -d --force-recreate schema-file-server
 ```
 
+### W3C schema creation fails with `PermissionDenied (os error 13)`
+
+If logs show:
+
+```text
+PermissionDenied - Permission denied (os error 13): writefile 'schemas/<id>.json'
+```
+
+recreate `schema-file-server` with the compose fix from this repo (`user: "0:0"`):
+
+```bash
+cd /home/apps/cdpi-poc/credebl
+docker compose up -d --force-recreate schema-file-server ledger organization api-gateway
+docker compose logs --since=2m schema-file-server ledger
+```
+
 **2. `JWT_TOKEN_SECRET` set but contains invalid chars** — only `[A-Za-z0-9+/=]` are valid. Regenerate with `openssl rand -base64 32`.
 
 ### W3C schema creation fails with `500 Internal Server error`
@@ -501,7 +519,7 @@ Fix on an existing VPS:
 ```bash
 cd /home/apps/cdpi-poc/credebl
 
-JWT_TOKEN_SECRET_VALUE=$(grep '^JWT_TOKEN_SECRET=' .env | cut -d= -f2-)
+JWT_TOKEN_SECRET_VALUE=$(grep '^JWT_TOKEN_SECRET=' .env | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '\r' | tr -d '\n')
 
 SCHEMA_FILE_SERVER_TOKEN=$(python3 - "$JWT_TOKEN_SECRET_VALUE" <<'PY'
 import base64
@@ -511,7 +529,13 @@ import json
 import sys
 import time
 
-secret = sys.argv[1].encode('utf-8')
+secret_input = sys.argv[1]
+try:
+  secret = base64.b64decode(secret_input, validate=True)
+  if not secret:
+    secret = secret_input.encode('utf-8')
+except Exception:
+  secret = secret_input.encode('utf-8')
 now = int(time.time())
 header = {"alg": "HS256", "typ": "JWT"}
 payload = {
@@ -534,7 +558,7 @@ PY
 sed -i '/^SCHEMA_FILE_SERVER_URL=/d' .env
 sed -i '/^SCHEMA_FILE_SERVER_TOKEN=/d' .env
 sed -i '/^ISSUER=/d' .env
-printf '\nSCHEMA_FILE_SERVER_URL=http://schema-file-server:4000/\nSCHEMA_FILE_SERVER_TOKEN=%s\nISSUER=Credebl\n' "$SCHEMA_FILE_SERVER_TOKEN" >> .env
+printf '\nSCHEMA_FILE_SERVER_URL=http://schema-file-server:4000/schemas\nSCHEMA_FILE_SERVER_TOKEN=%s\nISSUER=Credebl\n' "$SCHEMA_FILE_SERVER_TOKEN" >> .env
 
 docker compose up -d --force-recreate schema-file-server ledger organization api-gateway
 docker compose logs --tail=100 schema-file-server ledger

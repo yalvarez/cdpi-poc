@@ -111,7 +111,14 @@ schema_file_server_auth_envs_ok() {
   [ -n "${SCHEMA_FILE_SERVER_TOKEN:-}" ] &&
   [ -n "${JWT_TOKEN_SECRET:-}" ] &&
   [ -n "${ISSUER:-}" ] &&
-  printf '%s' "${SCHEMA_FILE_SERVER_URL}" | grep -q '/$'
+  printf '%s' "${SCHEMA_FILE_SERVER_URL}" | grep -Eq '/schemas/?$'
+}
+
+schema_file_server_storage_writable() {
+  docker compose exec -T schema-file-server sh -ec '
+    [ -d /app/schemas ] &&
+    [ -w /app/schemas ]
+  '
 }
 echo ""
 echo "============================================================"
@@ -162,6 +169,7 @@ check "agent runtime envs" "agent_runtime_envs_ok"
 check "agent-provisioning runtime" "agent_provisioning_runtime_ok"
 check "child agent runtime file" "agent_runtime_file_ok"
 check "schema-file-server auth envs" "schema_file_server_auth_envs_ok"
+check "schema-file-server writable storage" "schema_file_server_storage_writable"
 check "platform-admin shared agent" "platform_admin_shared_agent_ready"
 
 echo ""
