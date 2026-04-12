@@ -21,7 +21,19 @@ import { issueCredential } from '@/app/api/Issuance'
 import { pathRoutes } from '@/config/pathRoutes'
 import { store } from '@/lib/store'
 
-const buildCredentialContext = (): string[] => [CREDENTIAL_CONTEXT_VALUE]
+const buildCredentialContext = (schemaIdentifier?: string): string[] => {
+  const baseContext = [CREDENTIAL_CONTEXT_VALUE]
+
+  if (
+    schemaIdentifier &&
+    schemaIdentifier.trim() &&
+    schemaIdentifier !== CREDENTIAL_CONTEXT_VALUE
+  ) {
+    return [...baseContext, schemaIdentifier.trim()]
+  }
+
+  return baseContext
+}
 
 export const handleSubmit = async ({
   values,
@@ -56,7 +68,7 @@ export const handleSubmit = async ({
       credentialData: values?.credentialData.map((item: ICredentialdata) => ({
         connectionId: item.connectionId,
         credential: {
-          '@context': buildCredentialContext(),
+          '@context': buildCredentialContext(schemaDetails.schemaId),
           type: ['VerifiableCredential', schemaDetails.schemaName],
           issuer: {
             id: orgDid,
