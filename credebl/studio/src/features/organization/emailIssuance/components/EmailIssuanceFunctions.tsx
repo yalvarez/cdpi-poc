@@ -44,6 +44,19 @@ const buildCredentialContext = (schemaIdentifier?: string): string[] => {
   return baseContext
 }
 
+const resolveSchemaIdentifier = (
+  schemasIdentifier?: string,
+  credentialSelected?: ICredentials | null,
+): string | undefined => {
+  const fromState = schemasIdentifier?.trim()
+  if (fromState) {
+    return fromState
+  }
+
+  const fromSelected = credentialSelected?.schemaIdentifier?.trim()
+  return fromSelected || undefined
+}
+
 export const handleReset = ({
   setCredentialSelected,
   selectInputRef,
@@ -113,7 +126,7 @@ const transformW3CData = async (
   existingData: IConfirmOOBCredentialIssuance['userData'],
   orgId: string,
   credentialSelected: ICredentials | null | undefined,
-  schemasIdentifier: string | undefined, // ✅ Update parameter type
+  schemasIdentifier: string | undefined,
   schemaTypeValue: SchemaTypeValue | undefined,
 ): Promise<ITransformedData> => {
   const orgDID = await fetchOrganizationDetails(orgId)
@@ -199,11 +212,26 @@ export const confirmOOBCredentialIssuance = async ({
     if (schemaType === SchemaTypes.schema_INDY) {
       transformedData = transformIndyData(userData, credDefId)
     } else if (schemaType === SchemaTypes.schema_W3C) {
+      const resolvedSchemaIdentifier = resolveSchemaIdentifier(
+        schemasIdentifier,
+        credentialSelected,
+      )
+
+      if (!resolvedSchemaIdentifier) {
+        setFailure(
+          'Selected W3C schema is missing schema URL. Re-select schema and try again.',
+        )
+        setLoading(false)
+        setIssueLoader(false)
+        setOpenModal(false)
+        return
+      }
+
       transformedData = await transformW3CData(
         userData,
         orgId,
         credentialSelected,
-        schemasIdentifier, // This can now be string | undefined
+        resolvedSchemaIdentifier,
         schemaTypeValue,
       )
     }
