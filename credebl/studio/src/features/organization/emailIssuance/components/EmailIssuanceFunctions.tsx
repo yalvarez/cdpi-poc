@@ -49,7 +49,13 @@ const buildCredentialContext = (schemaIdentifier?: string): string[] => {
 const isValidUrl = (value?: string): value is string =>
   Boolean(value && URL_REGEX_PATTERN.test(value))
 
-const SCHEMA_CONTEXT_BASE_URL = 'http://schema-file-server:4000/schemas/'
+const runtimeEnv = globalThis as typeof globalThis & {
+  process?: { env?: Record<string, string | undefined> }
+}
+
+const SCHEMA_CONTEXT_BASE_URL =
+  runtimeEnv.process?.env?.NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL ||
+  'http://schema-file-server:4000/schemas/'
 
 const normalizeSchemaContextUrl = (
   candidate?: string,
@@ -69,8 +75,12 @@ const normalizeSchemaContextUrl = (
     return `${SCHEMA_CONTEXT_BASE_URL}${normalized}`
   }
 
-  if (normalized.startsWith('/schemas/')) {
-    return `http://schema-file-server:4000${normalized}`
+  if (/^\/schemas\//.test(normalized)) {
+    const schemaFileServerOrigin = SCHEMA_CONTEXT_BASE_URL.replace(
+      /\/schemas\/?$/,
+      '',
+    )
+    return `${schemaFileServerOrigin}${normalized}`
   }
 
   return undefined
