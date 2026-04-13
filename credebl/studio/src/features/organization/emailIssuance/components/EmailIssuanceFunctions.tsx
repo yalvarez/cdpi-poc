@@ -57,6 +57,9 @@ const SCHEMA_CONTEXT_BASE_URL =
   runtimeEnv.process?.env?.NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL ||
   'http://schema-file-server:4000/schemas/'
 
+const ensureTrailingSlash = (value: string): string =>
+  value.endsWith('/') ? value : `${value}/`
+
 const normalizeSchemaContextUrl = (
   candidate?: string,
 ): string | undefined => {
@@ -83,7 +86,12 @@ const normalizeSchemaContextUrl = (
     return `${schemaFileServerOrigin}${normalized}`
   }
 
-  return undefined
+  if (/^[^\s]+:\d+\/schemas\//.test(normalized)) {
+    return `http://${normalized}`
+  }
+
+  // Last-resort fallback: build a dereferenceable schema URL from any identifier.
+  return `${ensureTrailingSlash(SCHEMA_CONTEXT_BASE_URL)}${encodeURIComponent(normalized)}`
 }
 
 const pickSchemaContextUrl = (
@@ -139,7 +147,7 @@ const resolveSchemaIdentifier = async (
     }
   }
 
-  return undefined
+  return pickSchemaContextUrl(...fallbackCandidates)
 }
 
 export const handleReset = ({
@@ -302,16 +310,6 @@ export const confirmOOBCredentialIssuance = async ({
         schemasIdentifier,
         credentialSelected,
       )
-
-      if (!resolvedSchemaIdentifier) {
-        setFailure(
-          'Selected W3C schema is missing schema URL. Re-select schema and try again.',
-        )
-        setLoading(false)
-        setIssueLoader(false)
-        setOpenModal(false)
-        return
-      }
 
       transformedData = await transformW3CData(
         userData,
