@@ -34,7 +34,10 @@ AWS_ACCESS_KEY_ID=credebls3
 AWS_SECRET_ACCESS_KEY=$(gen_pass)
 CRYPTO_PRIVATE_KEY=$(gen_hex)
 
-# --- CREAR .env ---
+# --- RESOLVER RAÍZ DEL PROYECTO Y CREAR .env ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
 cat > credebl/.env <<EOF
 # --- CREDEBL PoC .env generado automáticamente ---
 ADMIN_EMAIL=$ADMIN_EMAIL
