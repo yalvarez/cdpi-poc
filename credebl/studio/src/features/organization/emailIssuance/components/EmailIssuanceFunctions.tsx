@@ -2,6 +2,7 @@
 import {
   CREDENTIAL_CONTEXT_VALUE,
   URL_REGEX_PATTERN,
+  UUID_REGEX,
   apiStatusCodes,
   proofPurpose,
 } from '@/config/CommonConstant'
@@ -48,12 +49,39 @@ const buildCredentialContext = (schemaIdentifier?: string): string[] => {
 const isValidUrl = (value?: string): value is string =>
   Boolean(value && URL_REGEX_PATTERN.test(value))
 
+const SCHEMA_CONTEXT_BASE_URL = 'http://schema-file-server:4000/schemas/'
+
+const normalizeSchemaContextUrl = (
+  candidate?: string,
+): string | undefined => {
+  const trimmed = candidate?.trim()
+  if (!trimmed) {
+    return undefined
+  }
+
+  const normalized = String(trimmed)
+
+  if (isValidUrl(normalized)) {
+    return normalized
+  }
+
+  if (UUID_REGEX.test(normalized)) {
+    return `${SCHEMA_CONTEXT_BASE_URL}${normalized}`
+  }
+
+  if (normalized.startsWith('/schemas/')) {
+    return `http://schema-file-server:4000${normalized}`
+  }
+
+  return undefined
+}
+
 const pickSchemaContextUrl = (
   ...candidates: (string | undefined)[]
 ): string | undefined => {
   for (const candidate of candidates) {
-    const normalized = candidate?.trim()
-    if (isValidUrl(normalized)) {
+    const normalized = normalizeSchemaContextUrl(candidate)
+    if (normalized) {
       return normalized
     }
   }
