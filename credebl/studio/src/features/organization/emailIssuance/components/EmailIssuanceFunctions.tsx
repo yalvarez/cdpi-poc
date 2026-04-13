@@ -27,6 +27,7 @@ import {
 import { AxiosResponse } from 'axios'
 import { getAllSchemas } from '@/app/api/schema'
 import { getOrganizationById } from '@/app/api/organization'
+import { getSchemaById } from '@/app/api/schema'
 import { getSchemaCredDef } from '@/app/api/BulkIssuance'
 import { issueOobEmailCredential } from '@/app/api/Issuance'
 import { pathRoutes } from '@/config/pathRoutes'
@@ -59,15 +60,47 @@ const pickSchemaContextUrl = (...candidates: Array<string | undefined>): string 
   return undefined
 }
 
-const resolveSchemaIdentifier = (
+const resolveSchemaIdentifier = async (
+  orgId: string,
   schemasIdentifier?: string,
   credentialSelected?: ICredentials | null,
-): string | undefined => {
-  return pickSchemaContextUrl(
+): Promise<string | undefined> => {
+  const directUrl = pickSchemaContextUrl(
     schemasIdentifier,
     credentialSelected?.schemaIdentifier,
     credentialSelected?.schemaLedgerId,
   )
+
+  if (directUrl) {
+    return directUrl
+  }
+
+  const fallbackCandidates = [
+    schemasIdentifier,
+    credentialSelected?.schemaIdentifier,
+    credentialSelected?.schemaLedgerId,
+  ].filter((candidate): candidate is string => Boolean(candidate?.trim()))
+
+  for (const candidate of fallbackCandidates) {
+    try {
+      const response = await getSchemaById(candidate, orgId)
+      const { data } = response as AxiosResponse
+      const resolved = pickSchemaContextUrl(
+        data?.data?.schemaId,
+        data?.data?.schemaLedgerId,
+        data?.data?.schemaIdentifier,
+        data?.data?.id,
+      )
+
+      if (resolved) {
+        return resolved
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return undefined
 }
 
 export const handleReset = ({
@@ -225,7 +258,8 @@ export const confirmOOBCredentialIssuance = async ({
     if (schemaType === SchemaTypes.schema_INDY) {
       transformedData = transformIndyData(userData, credDefId)
     } else if (schemaType === SchemaTypes.schema_W3C) {
-      const resolvedSchemaIdentifier = resolveSchemaIdentifier(
+      const resolvedSchemaIdentifier = await resolveSchemaIdentifier(
+        orgId,
         schemasIdentifier,
         credentialSelected,
       )
