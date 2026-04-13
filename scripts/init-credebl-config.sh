@@ -47,9 +47,9 @@ PLATFORM_WALLET_PASSWORD=$PLATFORM_WALLET_PASSWORD
 AGENT_PROTOCOL=http
 JWT_TOKEN_SECRET=$(gen_base64)
 
-# --- CREAR .env COMPLETO ---
+# --- RESOLVER RAÍZ DEL PROYECTO Y CREAR .env ---
 SCRIPT_DIR="$(cd \"$(dirname \"$0\")\" && pwd)"
-PROJECT_ROOT="$(dirname \"$SCRIPT_DIR\")"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 cat > credebl/.env <<EOF
 # --- CREDEBL PoC .env generado automáticamente ---
