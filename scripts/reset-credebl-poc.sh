@@ -5,8 +5,11 @@
 
 set -e
 
-# 1. Parar y eliminar todos los contenedores relacionados
-cd "$(dirname "$0")/.."
+
+# Always resolve project root (parent of scripts/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
 echo "[RESET] Parando y eliminando contenedores CREDEBL..."
 docker compose --env-file credebl/.env -f credebl/docker-compose.yml down --volumes --remove-orphans || true
 
@@ -21,10 +24,14 @@ if [ -n "$VOLUMENES" ]; then
   echo "$VOLUMENES" | xargs docker volume rm || true
 fi
 
+
 # 4. Eliminar archivos de configuración y datos locales
-cd "$(dirname "$0")/.."
 echo "[RESET] Eliminando archivos de configuración y datos locales..."
-rm -f credebl/.env
+if [ -f "$PROJECT_ROOT/credebl/.env" ]; then
+  rm -f "$PROJECT_ROOT/credebl/.env" && echo "[RESET] credebl/.env deleted."
+else
+  echo "[RESET] credebl/.env not found or already deleted."
+fi
 rm -rf credebl/certs/*
 rm -rf credebl/config/aws/*
 rm -rf credebl/config/postgres-init.sql credebl/config/keycloak-realm.json credebl/config/credebl-master-table.json
