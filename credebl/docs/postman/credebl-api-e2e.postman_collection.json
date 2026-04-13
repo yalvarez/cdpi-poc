@@ -3,7 +3,7 @@
     "_postman_id": "5dd8f1d0-6e56-4d0a-93ef-4f53fd6f3d9f",
     "name": "CREDEBL API E2E (CDPI PoC)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "End-to-end API flow without Studio UI: encrypt -> signin -> org -> wallet -> did -> schema -> email issuance"
+    "description": "End-to-end official API flow: local encrypt -> /v1/auth/signin -> org -> wallet -> did -> schema -> email issuance"
   },
   "event": [
     {
@@ -20,27 +20,44 @@
   ],
   "item": [
     {
-      "name": "01 Encrypt Password",
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"password\": \"{{admin_password}}\"\n}" },
-        "url": { "raw": "{{studio_url}}/api/encrypt", "host": ["{{studio_url}}"], "path": ["api", "encrypt"] }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200', function(){pm.response.to.have.status(200);});", "const j = pm.response.json();", "pm.environment.set('enc_password', j.data || '');", "pm.test('enc_password captured', function(){pm.expect(pm.environment.get('enc_password')).to.not.equal('');});"] } }]
-    },
-    {
-      "name": "02 Sign In",
+      "name": "01 Sign In (/v1) with Local Encryption",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const plain = pm.environment.get('admin_password') || 'changeme';",
+              "const key = pm.environment.get('crypto_private_key') || 'cdpi-poc-crypto-key-change-me';",
+              "const encrypted = CryptoJS.AES.encrypt(JSON.stringify(plain), key).toString();",
+              "pm.environment.set('enc_password', encrypted);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200/201', function(){pm.expect([200,201]).to.include(pm.response.code);});",
+              "const j = pm.response.json();",
+              "const t = j?.data?.access_token || '';",
+              "pm.environment.set('access_token', t);",
+              "pm.test('access_token captured', function(){pm.expect(t).to.not.equal('');});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [{ "key": "Content-Type", "value": "application/json" }],
         "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{enc_password}}\"\n}" },
-        "url": { "raw": "{{base_url}}/auth/signin", "host": ["{{base_url}}"], "path": ["auth", "signin"] }
+        "url": { "raw": "{{base_url}}/v1/auth/signin", "host": ["{{base_url}}"], "path": ["v1", "auth", "signin"] }
       },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200/201', function(){pm.expect([200,201]).to.include(pm.response.code);});", "const j = pm.response.json();", "const t = j?.data?.access_token || '';", "pm.environment.set('access_token', t);", "pm.test('access_token captured', function(){pm.expect(t).to.not.equal('');});"] } }]
+      "response": []
     },
     {
-      "name": "03 Create Organization",
+      "name": "02 Create Organization",
       "request": {
         "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
         "method": "POST",
@@ -51,7 +68,7 @@
       "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200/201', function(){pm.expect([200,201]).to.include(pm.response.code);});", "const j = pm.response.json();", "const id = j?.data?.id || j?.id || '';", "pm.environment.set('org_id', id);", "pm.test('org_id captured', function(){pm.expect(id).to.not.equal('');});"] } }]
     },
     {
-      "name": "04 Spin Up Shared Wallet",
+      "name": "03 Spin Up Shared Wallet",
       "request": {
         "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
         "method": "POST",
@@ -61,7 +78,7 @@
       }
     },
     {
-      "name": "05 Create DID (did:key)",
+      "name": "04 Create DID (did:key)",
       "request": {
         "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
         "method": "POST",
@@ -71,7 +88,7 @@
       }
     },
     {
-      "name": "06 Get Organization (capture orgDid)",
+      "name": "05 Get Organization (capture orgDid)",
       "request": {
         "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
         "method": "GET",
@@ -80,7 +97,7 @@
       "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200', function(){pm.response.to.have.status(200);});", "const j = pm.response.json();", "const did = j?.data?.org_agents?.[0]?.orgDid || '';", "pm.environment.set('org_did', did);", "pm.test('org_did captured', function(){pm.expect(did).to.not.equal('');});", "pm.environment.set('schema_type_value', did.startsWith('did:polygon:') ? 'polygon' : 'no_ledger');"] } }]
     },
     {
-      "name": "07 Create W3C Schema",
+      "name": "06 Create W3C Schema",
       "request": {
         "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
         "method": "POST",
@@ -91,7 +108,7 @@
       "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const j = pm.response.json();", "const sid = j?.data?.schemaLedgerId || j?.data?.schemaId || j?.data?.id || '';", "pm.environment.set('schema_id_raw', sid);", "pm.test('schema_id_raw captured', function(){pm.expect(sid).to.not.equal('');});"] } }]
     },
     {
-      "name": "08 Issue Credential Email (jsonld)",
+      "name": "07 Issue Credential Email (jsonld)",
       "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const baseRaw = pm.environment.get('schema_file_server_url') || 'http://schema-file-server:4000/schemas/';", "const idRaw = (pm.environment.get('schema_id_raw') || '').trim();", "let base = baseRaw.trim().replace(/\\/+$/, '');", "if (!/\\/schemas$/i.test(base)) base = base + '/schemas';", "let context2 = '';", "if (/^https?:\\/\\//i.test(idRaw)) { context2 = idRaw; }", "else if (/^\\/schemas\\//.test(idRaw)) { const origin = base.replace(/\\/schemas$/i, ''); context2 = origin + idRaw; }", "else if (/^[^\\s]+:\\d+\\/schemas\\//.test(idRaw)) { context2 = 'http://' + idRaw; }", "else { context2 = base + '/' + encodeURIComponent(idRaw); }", "pm.environment.set('schema_context_url', context2);", "if (!pm.environment.get('employee_id')) pm.environment.set('employee_id', 'EMP-' + Date.now());"] } }],
       "request": {
         "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
@@ -102,7 +119,7 @@
       }
     },
     {
-      "name": "09 List Issued Credentials",
+      "name": "08 List Issued Credentials",
       "request": {
         "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
         "method": "GET",

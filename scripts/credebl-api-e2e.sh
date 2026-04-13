@@ -9,8 +9,8 @@ set -euo pipefail
 #
 # Optional env vars:
 #   BASE_URL=http://<VPS_IP>:5000
-#   STUDIO_URL=http://<VPS_IP>:3000
 #   ADMIN_EMAIL=admin@cdpi-poc.local
+#   CRYPTO_PRIVATE_KEY=cdpi-poc-crypto-key-change-me
 #   SCHEMA_FILE_SERVER_URL=http://schema-file-server:4000/schemas/
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -23,6 +23,11 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "openssl is required" >&2
+  exit 1
+fi
+
 VPS_IP="${1:-}"
 EMAIL_TO="${2:-holder@example.com}"
 
@@ -32,9 +37,9 @@ if [ -z "$VPS_IP" ]; then
 fi
 
 BASE_URL="${BASE_URL:-http://$VPS_IP:5000}"
-STUDIO_URL="${STUDIO_URL:-http://$VPS_IP:3000}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@cdpi-poc.local}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-changeme}"
+CRYPTO_PRIVATE_KEY="${CRYPTO_PRIVATE_KEY:-cdpi-poc-crypto-key-change-me}"
 SCHEMA_FILE_SERVER_URL="${SCHEMA_FILE_SERVER_URL:-http://schema-file-server:4000/schemas/}"
 
 REQUEST_ID="$(date +%s)"
@@ -76,18 +81,23 @@ normalize_schema_context_url() {
   echo "${base}${value}"
 }
 
-echo "[1/8] Encrypt admin password via Studio API"
-ENC_PASSWORD="$(curl -sS -X POST "$STUDIO_URL/api/encrypt" \
-  -H "Content-Type: application/json" \
-  -d "{\"password\":\"$ADMIN_PASSWORD\"}" | jq -r '.data // empty')"
+encrypt_admin_password() {
+  local plain="$1"
+  local quoted
+  quoted="$(jq -Rn --arg p "$plain" '$p')"
+  printf '%s' "$quoted" | openssl enc -aes-256-cbc -salt -base64 -A -md md5 -pass "pass:$CRYPTO_PRIVATE_KEY"
+}
+
+echo "[1/8] Encrypt admin password locally"
+ENC_PASSWORD="$(encrypt_admin_password "$ADMIN_PASSWORD")"
 
 if [ -z "$ENC_PASSWORD" ]; then
-  echo "Failed to encrypt password via $STUDIO_URL/api/encrypt" >&2
+  echo "Failed to encrypt admin password locally" >&2
   exit 1
 fi
 
 echo "[2/8] Sign in"
-SIGNIN_RESPONSE="$(curl -sS -X POST "$BASE_URL/auth/signin" \
+SIGNIN_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/auth/signin" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ENC_PASSWORD\"}")"
 TOKEN="$(echo "$SIGNIN_RESPONSE" | jq -r '.data.access_token // empty')"

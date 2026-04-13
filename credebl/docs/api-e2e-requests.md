@@ -5,7 +5,7 @@ It is aligned with the current Studio API wrappers and payload builders in this 
 
 ## What This Covers
 
-1. Encrypt password via Studio API helper
+1. Encrypt password locally (OpenSSL-compatible AES)
 2. Sign in and obtain Bearer token
 3. Create organization
 4. Spin up shared wallet
@@ -25,24 +25,25 @@ It is aligned with the current Studio API wrappers and payload builders in this 
 ```bash
 VPS_IP="YOUR_VPS_IP"
 BASE_URL="http://$VPS_IP:5000"
-STUDIO_URL="http://$VPS_IP:3000"
 ADMIN_EMAIL="admin@cdpi-poc.local"
 ADMIN_PASSWORD="changeme"
+CRYPTO_PRIVATE_KEY="cdpi-poc-crypto-key-change-me"
 EMAIL_TO="holder@example.com"
 ```
 
-## 1) Encrypt Password (same mechanism Studio uses)
+## 1) Encrypt Password Locally (no Studio dependency)
 
 ```bash
-ENC_PASSWORD=$(curl -s -X POST "$STUDIO_URL/api/encrypt" \
-  -H "Content-Type: application/json" \
-  -d "{\"password\":\"$ADMIN_PASSWORD\"}" | jq -r '.data')
+# CREDEBL expects encrypted password in /v1/auth/signin
+# This matches Studio's CryptoJS AES format (OpenSSL salted, MD5 key derivation).
+ENC_PASSWORD=$(printf '%s' "$(jq -Rn --arg p "$ADMIN_PASSWORD" '$p')" \
+  | openssl enc -aes-256-cbc -salt -base64 -A -md md5 -pass "pass:$CRYPTO_PRIVATE_KEY")
 ```
 
 ## 2) Sign In
 
 ```bash
-SIGNIN=$(curl -s -X POST "$BASE_URL/auth/signin" \
+SIGNIN=$(curl -s -X POST "$BASE_URL/v1/auth/signin" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ENC_PASSWORD\"}")
 
@@ -211,8 +212,8 @@ Steps:
 
 1. Import both files into Postman.
 2. Select environment `CREDEBL API E2E - CDPI`.
-3. Set `base_url`, `studio_url`, and `admin_password`.
-4. Run requests in order from `01` to `09`.
+3. Set `base_url`, `admin_password`, and `crypto_private_key`.
+4. Run requests in order from `01` to `08`.
 
 The collection auto-captures and reuses:
 
