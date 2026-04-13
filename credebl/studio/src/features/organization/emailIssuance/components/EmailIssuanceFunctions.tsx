@@ -23,11 +23,10 @@ import {
   ICredentials,
   ITransformedData,
 } from '../../connectionIssuance/type/Issuance'
+import { getAllSchemas, getSchemaById } from '@/app/api/schema'
 
 import { AxiosResponse } from 'axios'
-import { getAllSchemas } from '@/app/api/schema'
 import { getOrganizationById } from '@/app/api/organization'
-import { getSchemaById } from '@/app/api/schema'
 import { getSchemaCredDef } from '@/app/api/BulkIssuance'
 import { issueOobEmailCredential } from '@/app/api/Issuance'
 import { pathRoutes } from '@/config/pathRoutes'
@@ -49,7 +48,9 @@ const buildCredentialContext = (schemaIdentifier?: string): string[] => {
 const isValidUrl = (value?: string): value is string =>
   Boolean(value && URL_REGEX_PATTERN.test(value))
 
-const pickSchemaContextUrl = (...candidates: Array<string | undefined>): string | undefined => {
+const pickSchemaContextUrl = (
+  ...candidates: (string | undefined)[]
+): string | undefined => {
   for (const candidate of candidates) {
     const normalized = candidate?.trim()
     if (isValidUrl(normalized)) {
