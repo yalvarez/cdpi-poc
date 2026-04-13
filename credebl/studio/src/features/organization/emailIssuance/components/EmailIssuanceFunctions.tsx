@@ -25,8 +25,9 @@ import {
 } from '../../connectionIssuance/type/Issuance'
 
 import { AxiosResponse } from 'axios'
-import { getAllSchemas, getSchemaById } from '@/app/api/schema'
+import { getAllSchemas } from '@/app/api/schema'
 import { getOrganizationById } from '@/app/api/organization'
+import { getSchemaById } from '@/app/api/schema'
 import { getSchemaCredDef } from '@/app/api/BulkIssuance'
 import { issueOobEmailCredential } from '@/app/api/Issuance'
 import { pathRoutes } from '@/config/pathRoutes'
