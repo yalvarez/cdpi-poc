@@ -14,8 +14,13 @@ gen_base64() { openssl rand -base64 32 | tr -d '\n'; }
 # --- PREGUNTAS CLAVE AL USUARIO ---
 echo "[CONFIG] Iniciando configuración interactiva CREDEBL PoC..."
 read -p "Dominio público para deeplink (ej: https://cdpi-poc.duckdns.org:4000): " DEEPLINK_DOMAIN
+
 echo "Dominio deeplink: $DEEPLINK_DOMAIN"
+# Preguntar explícitamente por el dominio/IP de Keycloak
+read -p "Dominio o IP de Keycloak (ej: keycloak.midominio.gov.co o IP:8080): " KEYCLOAK_HOST
+echo "Keycloak host: $KEYCLOAK_HOST"
 read -p "Email del administrador: " ADMIN_EMAIL
+
 
 # --- GENERACIÓN AUTOMÁTICA DE CLAVES Y CONTRASEÑAS ---
 POSTGRES_PASSWORD=$(gen_pass)
@@ -47,21 +52,28 @@ PLATFORM_WALLET_PASSWORD=$PLATFORM_WALLET_PASSWORD
 AGENT_PROTOCOL=http
 JWT_TOKEN_SECRET=$(gen_base64)
 
+# Sanitizar dominio/IP para evitar doble http://
+SANITIZED_DOMAIN=$(echo "$DEEPLINK_DOMAIN" | sed -E 's#^https?://##')
+# Sanitizar Keycloak host para evitar doble http:// o barra final
+SANITIZED_KEYCLOAK_HOST=$(echo "$KEYCLOAK_HOST" | sed -E 's#^https?://##; s#/$##')
+
 
 # --- RESOLVER RAÍZ DEL PROYECTO Y CREAR .env ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-# Reemplazo de placeholders por dominio/IP ingresado
-VPS_IP="$DEEPLINK_DOMAIN"
-API_ENDPOINT="$VPS_IP:5000"
-PLATFORM_WEB_URL="http://$VPS_IP:5000"
-FRONT_END_URL="http://$VPS_IP:5000"
-STUDIO_URL="http://$VPS_IP:3000"
-SOCKET_HOST="http://$VPS_IP:5000"
-ENABLE_CORS_IP_LIST="http://$VPS_IP:3000,http://localhost:3000,http://127.0.0.1:3000"
-KEYCLOAK_PUBLIC_URL="http://$VPS_IP:8080"
+VPS_IP="$SANITIZED_DOMAIN"
+API_ENDPOINT="$SANITIZED_DOMAIN:5000"
+PLATFORM_WEB_URL="http://$SANITIZED_DOMAIN:5000"
+FRONT_END_URL="http://$SANITIZED_DOMAIN:5000"
+
+STUDIO_URL="http://$SANITIZED_DOMAIN:3000"
+SOCKET_HOST="http://$SANITIZED_DOMAIN:5000"
+ENABLE_CORS_IP_LIST="http://$SANITIZED_DOMAIN:3000,http://localhost:3000,http://127.0.0.1:3000"
+KEYCLOAK_PUBLIC_URL="http://$SANITIZED_KEYCLOAK_HOST"
+KEYCLOAK_DOMAIN="http://$SANITIZED_KEYCLOAK_HOST/"
+KEYCLOAK_ADMIN_URL="http://$SANITIZED_KEYCLOAK_HOST"
 SCHEMA_FILE_SERVER_URL="http://schema-file-server:4000/schemas/"
 NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL="http://schema-file-server:4000/schemas/"
 
@@ -101,8 +113,8 @@ NATS_URL=nats://nats:4222
 # Keycloak (OIDC provider)
 KEYCLOAK_ADMIN_USER=admin
 KEYCLOAK_ADMIN_PASSWORD=$KEYCLOAK_ADMIN_PASSWORD
-KEYCLOAK_DOMAIN=http://keycloak:8080/
-KEYCLOAK_ADMIN_URL=http://keycloak:8080
+KEYCLOAK_DOMAIN=http://$SANITIZED_KEYCLOAK_HOST/
+KEYCLOAK_ADMIN_URL=http://$SANITIZED_KEYCLOAK_HOST
 KEYCLOAK_MASTER_REALM=master
 KEYCLOAK_REALM=credebl-realm
 KEYCLOAK_CLIENT_ID=credebl-client
@@ -113,10 +125,10 @@ PLATFORM_ADMIN_KEYCLOAK_ID=adminClient
 PLATFORM_ADMIN_KEYCLOAK_SECRET=$KEYCLOAK_CLIENT_SECRET
 PLATFORM_ADMIN_OLD_CLIENT_ID=
 PLATFORM_ADMIN_INITIAL_PASSWORD=$PLATFORM_ADMIN_INITIAL_PASSWORD
-KEYCLOAK_PUBLIC_URL=http://$SANITIZED_DOMAIN:8080
+KEYCLOAK_PUBLIC_URL=http://$SANITIZED_KEYCLOAK_HOST
 
 # Public URL para clientes externos
-KEYCLOAK_PUBLIC_URL=http://$SANITIZED_DOMAIN:8080
+KEYCLOAK_PUBLIC_URL=http://$SANITIZED_KEYCLOAK_HOST
 
 # MinIO (S3)
 MINIO_ROOT_USER=minioadmin
