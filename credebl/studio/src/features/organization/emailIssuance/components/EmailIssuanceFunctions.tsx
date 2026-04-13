@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   CREDENTIAL_CONTEXT_VALUE,
+  URL_REGEX_PATTERN,
   apiStatusCodes,
   proofPurpose,
 } from '@/config/CommonConstant'
@@ -44,17 +45,29 @@ const buildCredentialContext = (schemaIdentifier?: string): string[] => {
   return baseContext
 }
 
+const isValidUrl = (value?: string): value is string =>
+  Boolean(value && URL_REGEX_PATTERN.test(value))
+
+const pickSchemaContextUrl = (...candidates: Array<string | undefined>): string | undefined => {
+  for (const candidate of candidates) {
+    const normalized = candidate?.trim()
+    if (isValidUrl(normalized)) {
+      return normalized
+    }
+  }
+
+  return undefined
+}
+
 const resolveSchemaIdentifier = (
   schemasIdentifier?: string,
   credentialSelected?: ICredentials | null,
 ): string | undefined => {
-  const fromState = schemasIdentifier?.trim()
-  if (fromState) {
-    return fromState
-  }
-
-  const fromSelected = credentialSelected?.schemaIdentifier?.trim()
-  return fromSelected || undefined
+  return pickSchemaContextUrl(
+    schemasIdentifier,
+    credentialSelected?.schemaIdentifier,
+    credentialSelected?.schemaLedgerId,
+  )
 }
 
 export const handleReset = ({
@@ -287,6 +300,7 @@ const mapIndyCredentialDefs = (
         credentialDefinition,
         credentialDefinitionId,
         schemaIdentifier,
+        schemaLedgerId,
         schemaAttributes,
       }: ICredentials,
       id: number,
@@ -305,7 +319,10 @@ const mapIndyCredentialDefs = (
         schemaName: schemaName || '',
         schemaVersion,
         credentialDefinition,
-        schemaIdentifier,
+        schemaIdentifier: pickSchemaContextUrl(
+          schemaIdentifier,
+          schemaLedgerId,
+        ),
         credentialDefinitionId,
         id,
         schemaAttributes:
