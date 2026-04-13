@@ -53,9 +53,20 @@ const runtimeEnv = globalThis as typeof globalThis & {
   process?: { env?: Record<string, string | undefined> }
 }
 
-const SCHEMA_CONTEXT_BASE_URL =
-  runtimeEnv.process?.env?.NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL ||
-  'http://schema-file-server:4000/schemas/'
+const normalizeSchemaBaseUrl = (raw?: string): string => {
+  const fallback = 'http://schema-file-server:4000/schemas/'
+  const candidate = (raw || fallback).trim().replace(/\/+$/, '')
+
+  if (/\/schemas$/i.test(candidate)) {
+    return `${candidate}/`
+  }
+
+  return `${candidate}/schemas/`
+}
+
+const SCHEMA_CONTEXT_BASE_URL = normalizeSchemaBaseUrl(
+  runtimeEnv.process?.env?.NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL,
+)
 
 const ensureTrailingSlash = (value: string): string =>
   value.endsWith('/') ? value : `${value}/`
