@@ -436,6 +436,10 @@ services:
     container_name: credebl-utility
     restart: unless-stopped
     env_file: .env
+    environment:
+      AWS_SDK_LOAD_CONFIG: "1"
+    volumes:
+      - ./config/aws/config:/root/.aws/config:ro
     depends_on:
       nats:
         condition: service_healthy

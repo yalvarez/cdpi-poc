@@ -1,0 +1,2 @@
+[default]
+endpoint_url = http://minio:9000

@@ -133,8 +133,16 @@ WALLET_PAYLOAD="$(jq -n --arg label "ApiE2EWallet$REQUEST_ID" '{label:$label, cl
 WALLET_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/agents/wallet" "${auth_header[@]}" -d "$WALLET_PAYLOAD")"
 echo "$WALLET_RESPONSE" | jq '{statusCode, message}'
 
+WALLET_STATUS="$(echo "$WALLET_RESPONSE" | jq -r '.statusCode // empty')"
+if [ "$WALLET_STATUS" != "201" ]; then
+  echo "Wallet provisioning failed:" >&2
+  echo "$WALLET_RESPONSE" | jq . >&2 || echo "$WALLET_RESPONSE" >&2
+  exit 1
+fi
+
 echo "[5/8] Create DID (did:key)"
-DID_PAYLOAD='{"seed":"","keyType":"ed25519","method":"key","ledger":"","privatekey":"","network":"","domain":"","role":"","endorserDid":"","clientSocketId":"","isPrimaryDid":true}'
+DID_SEED="$(openssl rand -hex 16)"
+DID_PAYLOAD="{\"seed\":\"$DID_SEED\",\"keyType\":\"ed25519\",\"method\":\"key\",\"ledger\":\"\",\"privatekey\":\"\",\"network\":\"\",\"domain\":\"\",\"role\":\"\",\"endorserDid\":\"\",\"clientSocketId\":\"\",\"isPrimaryDid\":true}"
 DID_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/agents/did" "${auth_header[@]}" -d "$DID_PAYLOAD")"
 echo "$DID_RESPONSE" | jq '{statusCode, message, did: (.did // .data.did // "")}'
 
@@ -239,11 +247,24 @@ ISSUANCE_PAYLOAD="$(jq -n \
     credentialType:"jsonld"
   }')"
 
-ISSUE_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/credentials/oob/email?credentialType=jsonld" "${auth_header[@]}" -d "$ISSUANCE_PAYLOAD")"
+ISSUE_RESPONSE=""
+ISSUE_STATUS=""
+for attempt in $(seq 1 6); do
+  ISSUE_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/credentials/oob/email?credentialType=jsonld" "${auth_header[@]}" -d "$ISSUANCE_PAYLOAD")"
+  ISSUE_STATUS="$(echo "$ISSUE_RESPONSE" | jq -r '.statusCode // empty')"
+
+  if [ "$ISSUE_STATUS" = "201" ]; then
+    break
+  fi
+
+  # Tenant-agent startup can lag immediately after wallet provisioning.
+  sleep 5
+done
+
 echo "$ISSUE_RESPONSE" | jq .
 
 echo "[8/8] Fetch issued credential list (sanity check endpoint)"
-LIST_RESPONSE="$(curl -sS "$BASE_URL/orgs/$ORG_ID/credentials?pageSize=10&pageNumber=1&search=&sortBy=desc&sortField=createdAt" -H "Authorization: Bearer $TOKEN")"
+LIST_RESPONSE="$(curl -sS "$BASE_URL/orgs/$ORG_ID/credentials?pageSize=10&pageNumber=1&search=&sortBy=desc&sortField=createDateTime" -H "Authorization: Bearer $TOKEN")"
 echo "$LIST_RESPONSE" | jq '{statusCode, message, total: (.data.totalItems // .data.totalRecords // 0)}'
 
 echo "Done."
