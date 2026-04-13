@@ -1,0 +1,124 @@
+﻿{
+  "info": {
+    "_postman_id": "5dd8f1d0-6e56-4d0a-93ef-4f53fd6f3d9f",
+    "name": "CREDEBL API E2E (CDPI PoC)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "End-to-end API flow without Studio UI: encrypt -> signin -> org -> wallet -> did -> schema -> email issuance"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('schema_name')) pm.environment.set('schema_name', 'EmploymentApiFlow-' + Date.now());",
+          "if (!pm.environment.get('org_name')) pm.environment.set('org_name', 'CDPI API E2E Org ' + Date.now());",
+          "if (!pm.environment.get('employee_id')) pm.environment.set('employee_id', 'EMP-' + Date.now());"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Encrypt Password",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"password\": \"{{admin_password}}\"\n}" },
+        "url": { "raw": "{{studio_url}}/api/encrypt", "host": ["{{studio_url}}"], "path": ["api", "encrypt"] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200', function(){pm.response.to.have.status(200);});", "const j = pm.response.json();", "pm.environment.set('enc_password', j.data || '');", "pm.test('enc_password captured', function(){pm.expect(pm.environment.get('enc_password')).to.not.equal('');});"] } }]
+    },
+    {
+      "name": "02 Sign In",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{enc_password}}\"\n}" },
+        "url": { "raw": "{{base_url}}/auth/signin", "host": ["{{base_url}}"], "path": ["auth", "signin"] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200/201', function(){pm.expect([200,201]).to.include(pm.response.code);});", "const j = pm.response.json();", "const t = j?.data?.access_token || '';", "pm.environment.set('access_token', t);", "pm.test('access_token captured', function(){pm.expect(t).to.not.equal('');});"] } }]
+    },
+    {
+      "name": "03 Create Organization",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{org_name}}\",\n  \"description\": \"Organization created from Postman collection\",\n  \"website\": \"https://cdpi-poc.local\",\n  \"countryId\": null,\n  \"stateId\": null,\n  \"cityId\": null,\n  \"logo\": \"\"\n}" },
+        "url": { "raw": "{{base_url}}/orgs", "host": ["{{base_url}}"], "path": ["orgs"] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200/201', function(){pm.expect([200,201]).to.include(pm.response.code);});", "const j = pm.response.json();", "const id = j?.data?.id || j?.id || '';", "pm.environment.set('org_id', id);", "pm.test('org_id captured', function(){pm.expect(id).to.not.equal('');});"] } }]
+    },
+    {
+      "name": "04 Spin Up Shared Wallet",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"label\": \"ApiFlowWallet\",\n  \"clientSocketId\": \"\"\n}" },
+        "url": { "raw": "{{base_url}}/orgs/{{org_id}}/agents/wallet", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "agents", "wallet"] }
+      }
+    },
+    {
+      "name": "05 Create DID (did:key)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"seed\": \"\",\n  \"keyType\": \"ed25519\",\n  \"method\": \"key\",\n  \"ledger\": \"\",\n  \"privatekey\": \"\",\n  \"network\": \"\",\n  \"domain\": \"\",\n  \"role\": \"\",\n  \"endorserDid\": \"\",\n  \"clientSocketId\": \"\",\n  \"isPrimaryDid\": true\n}" },
+        "url": { "raw": "{{base_url}}/orgs/{{org_id}}/agents/did", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "agents", "did"] }
+      }
+    },
+    {
+      "name": "06 Get Organization (capture orgDid)",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/orgs/{{org_id}}", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}"] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200', function(){pm.response.to.have.status(200);});", "const j = pm.response.json();", "const did = j?.data?.org_agents?.[0]?.orgDid || '';", "pm.environment.set('org_did', did);", "pm.test('org_did captured', function(){pm.expect(did).to.not.equal('');});", "pm.environment.set('schema_type_value', did.startsWith('did:polygon:') ? 'polygon' : 'no_ledger');"] } }]
+    },
+    {
+      "name": "07 Create W3C Schema",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"type\": \"json\",\n  \"schemaPayload\": {\n    \"schemaName\": \"{{schema_name}}\",\n    \"schemaType\": \"{{schema_type_value}}\",\n    \"attributes\": [\n      { \"attributeName\": \"firstName\", \"schemaDataType\": \"string\", \"displayName\": \"First Name\", \"isRequired\": true },\n      { \"attributeName\": \"lastName\", \"schemaDataType\": \"string\", \"displayName\": \"Last Name\", \"isRequired\": true },\n      { \"attributeName\": \"employeeId\", \"schemaDataType\": \"string\", \"displayName\": \"Employee ID\", \"isRequired\": true }\n    ],\n    \"description\": \"{{schema_name}}\",\n    \"orgId\": \"{{org_id}}\"\n  }\n}" },
+        "url": { "raw": "{{base_url}}/orgs/{{org_id}}/schemas", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "schemas"] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const j = pm.response.json();", "const sid = j?.data?.schemaLedgerId || j?.data?.schemaId || j?.data?.id || '';", "pm.environment.set('schema_id_raw', sid);", "pm.test('schema_id_raw captured', function(){pm.expect(sid).to.not.equal('');});"] } }]
+    },
+    {
+      "name": "08 Issue Credential Email (jsonld)",
+      "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const baseRaw = pm.environment.get('schema_file_server_url') || 'http://schema-file-server:4000/schemas/';", "const idRaw = (pm.environment.get('schema_id_raw') || '').trim();", "let base = baseRaw.trim().replace(/\\/+$/, '');", "if (!/\\/schemas$/i.test(base)) base = base + '/schemas';", "let context2 = '';", "if (/^https?:\\/\\//i.test(idRaw)) { context2 = idRaw; }", "else if (/^\\/schemas\\//.test(idRaw)) { const origin = base.replace(/\\/schemas$/i, ''); context2 = origin + idRaw; }", "else if (/^[^\\s]+:\\d+\\/schemas\\//.test(idRaw)) { context2 = 'http://' + idRaw; }", "else { context2 = base + '/' + encodeURIComponent(idRaw); }", "pm.environment.set('schema_context_url', context2);", "if (!pm.environment.get('employee_id')) pm.environment.set('employee_id', 'EMP-' + Date.now());"] } }],
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"credentialOffer\": [\n    {\n      \"emailId\": \"{{email_to}}\",\n      \"credential\": {\n        \"@context\": [\n          \"https://www.w3.org/2018/credentials/v1\",\n          \"{{schema_context_url}}\"\n        ],\n        \"type\": [\n          \"VerifiableCredential\",\n          \"{{schema_name}}\"\n        ],\n        \"issuer\": {\n          \"id\": \"{{org_did}}\"\n        },\n        \"issuanceDate\": \"{{$isoTimestamp}}\",\n        \"credentialSubject\": {\n          \"firstName\": \"Maria\",\n          \"lastName\": \"Garcia\",\n          \"employeeId\": \"{{employee_id}}\"\n        }\n      },\n      \"options\": {\n        \"proofType\": \"Ed25519Signature2018\",\n        \"proofPurpose\": \"assertionMethod\"\n      }\n    }\n  ],\n  \"protocolVersion\": \"v2\",\n  \"isReuseConnection\": true,\n  \"credentialType\": \"jsonld\"\n}" },
+        "url": { "raw": "{{base_url}}/orgs/{{org_id}}/credentials/oob/email?credentialType=jsonld", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "credentials", "oob", "email"], "query": [{ "key": "credentialType", "value": "jsonld" }] }
+      }
+    },
+    {
+      "name": "09 List Issued Credentials",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/orgs/{{org_id}}/credentials?pageSize=10&pageNumber=1&search=&sortBy=desc&sortField=createdAt",
+          "host": ["{{base_url}}"],
+          "path": ["orgs", "{{org_id}}", "credentials"],
+          "query": [
+            { "key": "pageSize", "value": "10" },
+            { "key": "pageNumber", "value": "1" },
+            { "key": "search", "value": "" },
+            { "key": "sortBy", "value": "desc" },
+            { "key": "sortField", "value": "createdAt" }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -5,6 +5,8 @@
 **When to run**: Day 4 (with sample data) and Day 5 (with real integrations)  
 **Prerequisites**: Stack healthy (`bash scripts/health-check.sh`)
 
+> API-first path (no Studio clicks): see `credebl/docs/api-e2e-requests.md` and run `scripts/credebl-api-e2e.sh`.
+
 ---
 
 ## Setup — get a token and IDs
