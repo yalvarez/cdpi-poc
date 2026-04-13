@@ -120,4 +120,12 @@ INJI_CERTIFY_URL=http://VPS_IP:8091 \
 INJI_CLIENT_ID=cdpi-poc-verifier \
 INJI_REDIRECT_URI=http://VPS_IP:3001/verify \
 python3 sdk.py
+
+---
+
+## Automation and best practices
+
+- Use `scripts/init-credebl-config.sh` or the equivalent INJI setup scripts for fully automated environment setup (minimal prompts, all secrets auto-generated)
+- Always save the final credentials/secrets report securely
+- For full E2E test flows, see `inji/docs/test-flows.md`
 ```

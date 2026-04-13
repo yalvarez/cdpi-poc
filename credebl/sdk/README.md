@@ -198,3 +198,11 @@ startVerification();
 ## OIDC swap note (Day 5)
 
 After swapping Keycloak for the real country OIDC on Day 5, no SDK code changes are needed. The OIDC swap only affects authentication to the CREDEBL API — the verification flow itself remains identical.
+
+---
+
+## Automation and best practices
+
+- Use `scripts/init-credebl-config.sh` for fully automated environment setup (minimal prompts, all secrets auto-generated)
+- Always save the final credentials/secrets report securely
+- For full E2E test flows, see `credebl/docs/test-flows.md` and `credebl/docs/api-e2e-requests.md`

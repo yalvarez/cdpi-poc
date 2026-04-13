@@ -83,33 +83,70 @@ Select the DPG on Day 3 jointly with the country. Both are pre-built and ready.
 
 ---
 
-## Quick start
 
-### VPS setup (first time only)
+## Quick Start — Fully Automated Installation
+
+### 1. Prepare your server (first time only)
+
+- Ubuntu 22.04/24.04 LTS, 4 CPU, 8GB RAM, 150GB disk, AMD64 architecture
+- Open required ports: 22, 80, 443, 3000, 5000, 8080, 9011, 8025, 4000
+
+### 2. Clone the repository
+
+```bash
+git clone <CDPI_REPO_URL> /home/apps/cdpi-poc
+cd /home/apps/cdpi-poc
+```
+
+### 3. System dependencies (one-time)
+
 ```bash
 sudo bash scripts/setup-vps.sh
 ```
 
-### CREDEBL
+### 4. Configure environment (minimal prompts, all secrets auto-generated)
+
 ```bash
-# Recommended zero-to-running path on a fresh VPS
-bash scripts/init-credebl.sh
+bash scripts/init-credebl-config.sh
 ```
 
-This interactive initializer now fills the required **shared-wallet / agent provisioning** values too (`PLATFORM_WALLET_*`, `AGENT_API_KEY`, `WALLET_STORAGE_*`), updates `credebl/config/credebl-master-table.json`, and starts the stack.
+- Only asks for domain and admin email
+- All secrets/passwords are generated automatically
+- At the end, a full report of all credentials and secrets is printed — save this securely
 
-Manual alternative:
+### 5. Start CREDEBL stack
+
 ```bash
-cd credebl
-cp .env.example .env && nano .env
-VPS_IP=$(curl -s ifconfig.me)
-sed -i "s/YOUR_VPS_IP/$VPS_IP/g" .env config/credebl-master-table.json
-# Keep API_ENDPOINT as host:port only; API_GATEWAY_PROTOCOL provides the scheme.
-docker compose pull && docker compose up -d
-bash ../scripts/health-check.sh
+docker compose --env-file credebl/.env -f credebl/docker-compose.yml up -d
 ```
 
-### INJI
+Wait for all services to be healthy (`docker compose ps`).
+
+### 6. Health check
+
+```bash
+bash scripts/health-check.sh
+```
+
+All services should show as healthy.
+
+### 7. Access the platform
+
+- Studio (web UI): `http://<YOUR_DOMAIN_OR_IP>:3000`
+- Use the admin credentials from the final report
+
+### 8. (Optional) End-to-end test
+
+```bash
+bash scripts/credebl-api-e2e.sh <YOUR_IP> <your_email>
+```
+
+---
+
+### INJI stack (if selected)
+
+Follow the same pattern:
+
 ```bash
 export CERTIFY_KEYSTORE_PASSWORD=$(openssl rand -hex 16)
 bash scripts/generate-inji-certs.sh
@@ -138,6 +175,26 @@ bash ../scripts/health-check-inji.sh
 
 ---
 
+---
+
+
+## Reset CREDEBL installation (full cleanup)
+
+If you need to wipe the server for a clean install, run:
+
+```bash
+bash scripts/reset-credebl-poc.sh
+```
+
+This script:
+- Removes all containers, volumes, and config/data files related to CREDEBL
+- Cleans logs and leaves the environment ready for a new installation
+
+**Warning:** Does not delete Docker resources outside CREDEBL/cdpi-poc
+
+---
+
+
 ## Mission day reference
 
 | Day | Action |
@@ -148,6 +205,7 @@ bash ../scripts/health-check-inji.sh
 | **Day 5** | Connect real DB · swap OIDC · UAT sign-off |
 
 ---
+
 
 ## Access points
 
@@ -169,6 +227,7 @@ bash ../scripts/health-check-inji.sh
 | Email (Mailpit) | `http://VPS_IP:8026` |
 
 ---
+
 
 ## Important — before first deploy
 

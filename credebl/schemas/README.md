@@ -31,10 +31,10 @@ schema_name.json
 
 ### Day 1-2 — Country adapts the schema
 
-The country's process owners review the template for their use case and adapt it:
+The country team reviews and adapts the template for their use case:
 
-1. Open the relevant `schema_name.json`
-2. Review `schema.properties` — add or remove fields to match the country's data model
+1. Open the relevant `schema_name.json` file
+2. Review `schema.properties` — add/remove fields to match the country's data model
 3. Review `disclosure_frame._sd` — confirm which fields should be selectively disclosable
 4. Update `vct_type_metadata.display` with the correct institution name and language labels
 5. Update `sample_credential_data` with realistic country-specific values
@@ -44,7 +44,7 @@ The country's process owners review the template for their use case and adapt it
 Use the `credebl_api_payload` block directly in the CREDEBL API:
 
 ```bash
-# 1. Get an auth token
+# 1. Get an auth token (see scripts/init-credebl-config.sh for automated setup)
 TOKEN=$(curl -s -X POST http://VPS_IP:5000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@cdpi-poc.local","password":"YOUR_PASSWORD"}' \
@@ -57,7 +57,7 @@ curl -s -X POST http://VPS_IP:5000/schema/create \
   -d '{
     "name": "EmploymentCertification",
     "version": "1.0",
-    "schemaType": "SD_JWT_VC",
+    "schemaType": "SD_JWT_VC",'
     "vct": "https://schemas.cdpi-poc.local/employment/v1",
     "attributes": [
       "given_name", "family_name", "birthdate", "document_number",
@@ -98,6 +98,7 @@ Each schema has two groups:
 - **`_always_revealed`** — these fields are always visible in every presentation. Used for fields that don't have meaningful privacy sensitivity and are needed for basic verification.
 - **`_sd` (selectively disclosable)** — the holder can choose to reveal or hide these per presentation.
 
+
 ### Adjusting for country context
 
 Some fields may need to move between groups depending on the country's legal and cultural context:
@@ -110,6 +111,7 @@ Some fields may need to move between groups depending on the country's legal and
 ---
 
 ## Adapting for a specific country use case
+
 
 ### Step 1 — Rename the vct URL
 
