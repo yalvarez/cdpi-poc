@@ -40,6 +40,47 @@ Al no tener acceso al código fuente de los microservicios DPG (utility y tenant
   docker logs <nombre_contenedor>
   ```
 
+## Hotfix 3 — Stale Credo controller container (`error in wallet provision : {}`)
+
+### Síntoma
+`agent-service` arranca, encuentra el org de Platform-admin en la DB, intenta provisionar
+el wallet vía NATS a `agent-provisioning`, y falla con error vacío `{}`. Los servicios
+`agent-service` y `agent-provisioning` entran en crash-loop sin mensaje de error útil.
+
+### Causa raíz
+Los containers Credo controller (`ghcr.io/credebl/credo-controller:latest`) son lanzados
+por `agent-provisioning` vía `docker run` **fuera del scope de docker compose**. Cuando
+se hace `docker compose down -v`, estos containers no se detienen. Si un container Credo
+viejo sigue corriendo y tiene ocupados los puertos 8001/9001, el nuevo intento de spin-up
+falla al hacer `docker run` con el puerto ya en uso — la excepción es swallowed y solo se
+ve `error in wallet provision : {}`.
+
+### Fix manual (en VPS existente)
+```bash
+cd /home/apps/cdpi-poc/credebl
+
+# 1. Identificar y matar containers Credo viejos
+docker ps -a --filter "ancestor=ghcr.io/credebl/credo-controller:latest" --format "{{.Names}}"
+docker rm -f <nombre_del_container_viejo>
+
+# 2. Limpiar registro parcial en la DB
+POSTGRES_PASSWORD=$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2)
+docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+  psql -U credebl -d credebl -c "
+    DELETE FROM org_agents oa USING organisation o
+    WHERE oa.\"orgId\" = o.id AND o.name = 'Platform-admin';"
+
+# 3. Reiniciar servicios del agente
+docker compose restart agent-provisioning agent-service
+
+# 4. Esperar ~60s y verificar que el nuevo Credo container arrancó
+docker ps | grep credo
+```
+
+### Fix permanente
+El script `init-credebl.sh` ahora limpia estos containers automáticamente antes de
+arrancar el stack y en cada ciclo de reintento del shared agent.
+
 ## Notas
 - Si cambian los nombres de los contenedores, ajusta las variables en el script.
 - Si hay cambios mayores en la estructura de los archivos, revisa y adapta el sed del script.

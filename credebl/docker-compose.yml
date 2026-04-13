@@ -599,6 +599,16 @@ services:
       - ${PWD}/.agent-runtime/endpoints:/app/agent-provisioning/AFJ/endpoints
       - ${PWD}/.agent-runtime/agent.env:/app/agent.env:ro
       - /var/run/docker.sock:/var/run/docker.sock
+    # Healthcheck: passes once the NestJS microservice process is running.
+    # agent-service depends on this being healthy before it starts, which
+    # prevents the race condition where agent-service tries to call
+    # agent-provisioning via NATS before it has finished Prisma migrations.
+    healthcheck:
+      test: ["CMD", "sh", "-c", "pgrep -f 'node.*main' > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 90s
     depends_on:
       nats:
         condition: service_healthy
@@ -643,7 +653,7 @@ services:
         : "${WALLET_STORAGE_PASSWORD:?WALLET_STORAGE_PASSWORD is required}";
         : "${SOCKET_HOST:?SOCKET_HOST is required}";
         : "${AFJ_VERSION:?AFJ_VERSION is required}";
-        sleep 5 && node dist/apps/agent-service/main.js
+        sleep 10 && node dist/apps/agent-service/main.js
       '
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -651,7 +661,7 @@ services:
       - ${PWD}/.agent-runtime/token:/app/agent-provisioning/AFJ/token
     depends_on:
       agent-provisioning:
-        condition: service_started
+        condition: service_healthy
       platform-admin-bootstrap:
         condition: service_completed_successfully
     networks:

@@ -224,6 +224,9 @@ ensure_platform_admin_shared_agent() {
 
     echo "  Not ready yet (attempt $attempt/12). Clearing stale record and restarting..."
     clear_stale_platform_admin_agent || true
+    # Also remove any stale Credo containers blocking the agent ports
+    docker ps -a --filter "ancestor=ghcr.io/credebl/credo-controller:latest" \
+      --format "{{.Names}}" 2>/dev/null | xargs -r docker rm -f || true
     docker compose up -d cloud-wallet >/dev/null
     docker compose restart agent-provisioning agent-service >/dev/null
     sleep 10
@@ -493,6 +496,22 @@ mkdir -p .agent-runtime/agent-config .agent-runtime/token .agent-runtime/endpoin
 
 if ask_yes_no "Clean reset first? (docker compose down -v --remove-orphans)" "Y"; then
   docker compose down -v --remove-orphans
+fi
+
+# Remove any stale Credo controller containers left over from previous deployments.
+# These are spawned by agent-provisioning via `docker run` (outside compose scope),
+# so `docker compose down` never removes them. If they hold ports 8001/9001, the
+# new spin-up will fail silently with `error in wallet provision : {}`.
+echo
+echo "Cleaning up stale Credo controller containers from previous deployments..."
+STALE_CREDO=$(docker ps -a \
+  --filter "ancestor=ghcr.io/credebl/credo-controller:latest" \
+  --format "{{.Names}}" 2>/dev/null || true)
+if [ -n "$STALE_CREDO" ]; then
+  echo "$STALE_CREDO" | xargs docker rm -f
+  echo "  Removed: $STALE_CREDO"
+else
+  echo "  No stale Credo containers found."
 fi
 
 echo
