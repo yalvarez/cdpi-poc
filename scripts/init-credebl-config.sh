@@ -70,8 +70,9 @@ NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL="http://schema-file-server:4000/schemas/"
 # --- Sanitizar dominio/IP para evitar doble http:// ---
 SANITIZED_DOMAIN=$(echo "$DEEPLINK_DOMAIN" | sed -E 's#^https?://##')
 
-# --- Generar valores seguros y sin saltos de línea ---
-CRYPTO_PRIVATE_KEY=$(gen_hex | tr -d '\n')
+
+# --- Generar CRYPTO_PRIVATE_KEY seguro y sin saltos de línea ---
+CRYPTO_PRIVATE_KEY=$(head -c 32 /dev/urandom | xxd -p | tr -d '\n' | head -c 64)
 
 cat > credebl/.env <<EOF
 GEO_LOCATION_MASTER_DATA_IMPORT_SCRIPT=libs/prisma-service/prisma/scripts/geo_location_data_import.sh
