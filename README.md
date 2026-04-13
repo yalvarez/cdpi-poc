@@ -84,9 +84,9 @@ Select the DPG on Day 3 jointly with the country. Both are pre-built and ready.
 ---
 
 
-## Quick Start — Fully Automated Installation
+## Quick Start — CREDEBL
 
-### 1. Prepare your server (first time only)
+### 1. Prepare your server (one-time)
 
 - Ubuntu 22.04/24.04 LTS, 4 CPU, 8GB RAM, 150GB disk, AMD64 architecture
 - Open required ports: 22, 80, 443, 3000, 5000, 8080, 9011, 8025, 4000
@@ -104,38 +104,32 @@ cd /home/apps/cdpi-poc
 sudo bash scripts/setup-vps.sh
 ```
 
-### 4. Configure environment (minimal prompts, all secrets auto-generated)
+### 4. Initialize and deploy
 
 ```bash
-bash scripts/init-credebl-config.sh
+bash scripts/init-credebl.sh
 ```
 
-- Only asks for domain and admin email
-- All secrets/passwords are generated automatically
-- At the end, a full report of all credentials and secrets is printed — save this securely
+The script asks **4 questions** (5 if you enable HTTPS):
 
-### 5. Start CREDEBL stack
+| Question | Default |
+|----------|---------|
+| VPS public IP or hostname | auto-detected |
+| Keycloak host | same as VPS |
+| Platform admin email | `admin@cdpi-poc.local` |
+| Enable HTTPS with Let's Encrypt? | No |
+| ↳ Domain for the certificate *(only if HTTPS = yes)* | — |
 
-```bash
-docker compose --env-file credebl/.env -f credebl/docker-compose.yml up -d
-```
+All passwords and secrets are generated automatically. A **full credentials report** is printed before Docker starts — save it securely.
 
-Wait for all services to be healthy (`docker compose ps`).
+The script then pulls images, starts the stack, waits for MinIO and the platform-admin shared agent to be ready, optionally configures the SSL certificate, and runs the health check automatically.
 
-### 6. Health check
+### 5. Access the platform
 
-```bash
-bash scripts/health-check.sh
-```
+- Studio (web UI): `http://<YOUR_IP>:3000`
+- Credentials: from the report printed in step 4
 
-All services should show as healthy.
-
-### 7. Access the platform
-
-- Studio (web UI): `http://<YOUR_DOMAIN_OR_IP>:3000`
-- Use the admin credentials from the final report
-
-### 8. (Optional) End-to-end test
+### 6. (Optional) End-to-end test
 
 ```bash
 bash scripts/credebl-api-e2e.sh <YOUR_IP> <your_email>
@@ -241,15 +235,15 @@ Run `generate-inji-certs.sh` before first deploy to create the required keystore
 ## Status
 
 - [x] CREDEBL — Docker Compose, env template, Keycloak, MinIO, Mailpit
+- [x] CREDEBL — Single-path initializer (`init-credebl.sh`) — 4 prompts, full deploy
 - [x] CREDEBL — OIDC swap procedure (Day 5)
 - [x] CREDEBL — Deployment manual + test flows
 - [x] CREDEBL — Verification SDK (Node.js + Python)
 - [x] SD-JWT VC schema templates × 4
 - [x] INJI — Docker Compose, env template, Certify + eSignet + Mimoto + Nginx
 - [x] INJI — OIDC swap procedure (Day 5)
-- [x] INJI — Deployment manual
+- [x] INJI — Deployment manual + test flows
+- [x] INJI — Verification SDK (Node.js + Python)
 - [x] VPS setup script + health check scripts (CREDEBL + INJI)
 - [x] Keystore generation script
-- [ ] INJI — test flows
-- [ ] INJI — verification SDK
 - [x] `credebl-master-table.json` aligned with the upstream CREDEBL seed schema

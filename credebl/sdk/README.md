@@ -203,6 +203,6 @@ After swapping Keycloak for the real country OIDC on Day 5, no SDK code changes 
 
 ## Automation and best practices
 
-- Use `scripts/init-credebl-config.sh` for fully automated environment setup (minimal prompts, all secrets auto-generated)
+- Use `scripts/init-credebl.sh` for fully automated environment setup (4 prompts, all secrets auto-generated)
 - Always save the final credentials/secrets report securely
 - For full E2E test flows, see `credebl/docs/test-flows.md` and `credebl/docs/api-e2e-requests.md`

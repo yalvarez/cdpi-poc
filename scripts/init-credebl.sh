@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CDPI PoC — Interactive CREDEBL initializer
+# CDPI PoC — CREDEBL single-path initializer
 # -----------------------------------------------------------------------------
-# Prompts for the required deployment values, writes `credebl/.env`, updates the
-# seed host values, and then runs the Docker deployment commands.
+# Single entry point for a complete CREDEBL deployment.
+# Asks only 4-5 essential questions; all secrets are generated automatically.
 #
 # Usage:
-#   chmod +x scripts/init-credebl.sh
 #   bash scripts/init-credebl.sh
 # =============================================================================
 
 set -euo pipefail
 
+# --- Paths -------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CREDEBL_DIR="$REPO_DIR/credebl"
@@ -21,44 +21,20 @@ MASTER_TABLE="$CREDEBL_DIR/config/credebl-master-table.json"
 AGENT_RUNTIME_DIR="$CREDEBL_DIR/.agent-runtime"
 AGENT_RUNTIME_ENV_FILE="$AGENT_RUNTIME_DIR/agent.env"
 
+# --- Utility functions -------------------------------------------------------
+
 require_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "Error: required command '$1' was not found." >&2
-    exit 1
-  fi
+  command -v "$1" >/dev/null 2>&1 || { echo "Error: required command '$1' not found." >&2; exit 1; }
 }
 
-require_cmd docker
-require_cmd python3
-require_cmd openssl
-require_cmd curl
-
-if ! docker info >/dev/null 2>&1; then
-  echo "Error: Docker is not running or this user cannot access it." >&2
-  exit 1
-fi
-
-if [ ! -f "$ENV_TEMPLATE" ]; then
-  echo "Error: template not found at $ENV_TEMPLATE" >&2
-  exit 1
-fi
-
-if [ ! -f "$MASTER_TABLE" ]; then
-  echo "Error: seed config not found at $MASTER_TABLE" >&2
-  exit 1
-fi
-
-trim() {
-  printf '%s' "$1" | sed 's/^ *//;s/ *$//'
-}
-
+# Strip protocol and trailing slashes from a host input
 sanitize_host() {
-  local value
-  value="$(trim "$1")"
-  value="${value#http://}"
-  value="${value#https://}"
-  value="${value%%/*}"
-  printf '%s' "$value"
+  local v
+  v="$(printf '%s' "$1" | sed 's/^ *//;s/ *$//')"
+  v="${v#http://}"
+  v="${v#https://}"
+  v="${v%%/*}"
+  printf '%s' "$v"
 }
 
 ask() {
@@ -69,31 +45,20 @@ ask() {
 
   while true; do
     if [ "$secret" = "true" ]; then
-      if [ -n "$default" ]; then
-        printf "%s [press Enter to use current/default value]: " "$prompt" >&2
-      else
-        printf "%s: " "$prompt" >&2
-      fi
+      [ -n "$default" ] \
+        && printf "%s [press Enter for auto-generated value]: " "$prompt" >&2 \
+        || printf "%s: " "$prompt" >&2
       read -r -s value
       printf "\n" >&2
     else
-      if [ -n "$default" ]; then
-        printf "%s [%s]: " "$prompt" "$default" >&2
-      else
-        printf "%s: " "$prompt" >&2
-      fi
+      [ -n "$default" ] \
+        && printf "%s [%s]: " "$prompt" "$default" >&2 \
+        || printf "%s: " "$prompt" >&2
       read -r value
     fi
 
-    if [ -z "$value" ]; then
-      value="$default"
-    fi
-
-    if [ -n "$value" ]; then
-      printf '%s' "$value"
-      return 0
-    fi
-
+    [ -z "$value" ] && value="$default"
+    [ -n "$value" ] && { printf '%s' "$value"; return 0; }
     echo "A value is required." >&2
   done
 }
@@ -101,104 +66,63 @@ ask() {
 ask_yes_no() {
   local prompt="$1"
   local default="${2:-N}"
-  local reply
-  local suffix="[y/N]"
-
-  if [ "$default" = "Y" ]; then
-    suffix="[Y/n]"
-  fi
+  local reply suffix="[y/N]"
+  [ "$default" = "Y" ] && suffix="[Y/n]"
 
   while true; do
     printf "%s %s: " "$prompt" "$suffix" >&2
     read -r reply
-    reply="$(trim "$reply")"
-
-    if [ -z "$reply" ]; then
-      reply="$default"
-    fi
-
-    case "${reply,,}" in
-      y|yes) return 0 ;;
-      n|no) return 1 ;;
+    reply="$(printf '%s' "$reply" | sed 's/^ *//;s/ *$//')"
+    [ -z "$reply" ] && reply="$default"
+    case "$reply" in
+      [Yy]|[Yy][Ee][Ss]) return 0 ;;
+      [Nn]|[Nn][Oo])     return 1 ;;
     esac
-
     echo "Please answer yes or no." >&2
   done
 }
 
-ensure_alnum() {
-  local name="$1"
-  local value="$2"
-  if [[ ! "$value" =~ ^[A-Za-z0-9]+$ ]]; then
-    echo "Error: $name must use only letters and numbers for this PoC." >&2
-    exit 1
-  fi
-}
-
+# Generate an HS256 JWT signed with JWT_TOKEN_SECRET for schema-file-server
 generate_hs256_jwt() {
-  local secret="$1"
-  local issuer="$2"
+  python3 - "$1" "$2" <<'PY'
+import base64, hashlib, hmac, json, sys, time
 
-  python3 - "$secret" "$issuer" <<'PY'
-import base64
-import hashlib
-import hmac
-import json
-import sys
-import time
-
-secret_input = sys.argv[1]
-issuer = sys.argv[2]
+secret_input, issuer = sys.argv[1], sys.argv[2]
 now = int(time.time())
 
 try:
-  # schema-file-server expects JWT_TOKEN_SECRET as base64 and validates
-  # signatures with the decoded bytes.
-  secret = base64.b64decode(secret_input, validate=True)
-  if not secret:
-    secret = secret_input.encode("utf-8")
+    secret = base64.b64decode(secret_input, validate=True)
+    if not secret:
+        secret = secret_input.encode("utf-8")
 except Exception:
-  # Fallback for non-base64 secrets in legacy/manual setups.
-  secret = secret_input.encode("utf-8")
+    secret = secret_input.encode("utf-8")
 
-header = {"alg": "HS256", "typ": "JWT"}
-payload = {
-    "iss": issuer,
-    "sub": "schema-file-server",
-    "iat": now,
-    "exp": now + (10 * 365 * 24 * 60 * 60),
-}
-
-def b64url(data: bytes) -> str:
+def b64url(data):
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
-header_segment = b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
-payload_segment = b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-signing_input = f"{header_segment}.{payload_segment}".encode("ascii")
-signature = hmac.new(secret, signing_input, hashlib.sha256).digest()
-
-print(f"{header_segment}.{payload_segment}.{b64url(signature)}")
+h = b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+p = b64url(json.dumps(
+    {"iss": issuer, "sub": "schema-file-server", "iat": now, "exp": now + 315360000},
+    separators=(",", ":"),
+).encode())
+sig = b64url(hmac.new(secret, f"{h}.{p}".encode("ascii"), hashlib.sha256).digest())
+print(f"{h}.{p}.{sig}")
 PY
 }
 
 write_agent_runtime_env() {
   mkdir -p "$AGENT_RUNTIME_DIR/agent-config" "$AGENT_RUNTIME_DIR/token" "$AGENT_RUNTIME_DIR/endpoints"
 
-  # Recover from a common misconfiguration where agent.env was created as a directory.
-  if [ -d "$AGENT_RUNTIME_ENV_FILE" ]; then
-    echo "Warning: $AGENT_RUNTIME_ENV_FILE is a directory; recreating it as a file."
-    rm -rf "$AGENT_RUNTIME_ENV_FILE"
-  fi
+  # Guard against a previous run that left agent.env as a directory
+  [ -d "$AGENT_RUNTIME_ENV_FILE" ] && rm -rf "$AGENT_RUNTIME_ENV_FILE"
 
   cat > "$AGENT_RUNTIME_ENV_FILE" <<EOF
-# Generated by scripts/init-credebl.sh
-# Mounted into agent-provisioning as /app/agent.env for spawned Credo agents.
-
+# Generated by scripts/init-credebl.sh — do not edit manually
 LEDGER_URL=http://test.bcovrin.vonx.io
 GENESIS_URL=http://test.bcovrin.vonx.io/genesis
 TAILS_FILE_SERVER=https://tails.vonx.io
-AGENT_HTTP_URL=http://${PUBLIC_HOST}
-AGENT_WS_URL=ws://${PUBLIC_HOST}
+AGENT_HTTP_URL=http://${VPS_HOST}
+AGENT_WS_URL=ws://${VPS_HOST}
 CONNECT_TIMEOUT=10
 MAX_CONNECTIONS=1000
 IDLE_TIMEOUT=30000
@@ -211,43 +135,30 @@ EOF
 }
 
 wait_for_container_state() {
-  local container_name="$1"
-  local expected_pattern="$2"
-  local attempts="${3:-60}"
-  local current_state=""
-  local i=1
-
+  local name="$1" pattern="$2" attempts="${3:-60}" i=1
   while [ "$i" -le "$attempts" ]; do
-    current_state="$(docker inspect --format='{{.State.Status}} {{.State.ExitCode}}' "$container_name" 2>/dev/null || true)"
-    if printf '%s' "$current_state" | grep -Eqi "$expected_pattern"; then
-      return 0
-    fi
+    docker inspect --format='{{.State.Status}} {{.State.ExitCode}}' "$name" 2>/dev/null \
+      | grep -Eqi "$pattern" && return 0
     sleep 2
     i=$((i + 1))
   done
-
   return 1
 }
 
 ensure_minio_setup() {
   echo
   echo "Ensuring MinIO buckets and access keys are initialized..."
-
   docker compose up -d minio >/dev/null
 
   local attempt=1
-  local max_attempts=5
-  while [ "$attempt" -le "$max_attempts" ]; do
+  while [ "$attempt" -le 5 ]; do
     docker compose rm -sf minio-setup >/dev/null 2>&1 || true
-
-    if docker compose up --no-deps minio-setup; then
-      if wait_for_container_state "credebl-minio-setup" '^exited 0$' 10; then
-        echo "MinIO setup complete."
-        return 0
-      fi
+    if docker compose up --no-deps minio-setup \
+       && wait_for_container_state "credebl-minio-setup" '^exited 0$' 10; then
+      echo "MinIO setup complete."
+      return 0
     fi
-
-    echo "  MinIO setup failed (attempt $attempt/$max_attempts). Retrying..."
+    echo "  MinIO setup failed (attempt $attempt/5). Retrying..."
     attempt=$((attempt + 1))
     sleep 3
   done
@@ -260,33 +171,30 @@ ensure_minio_setup() {
 platform_admin_shared_agent_ready() {
   local row status endpoint token_url
   row="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
-    psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -Atqc "
-      SELECT COALESCE(oa.\"agentSpinUpStatus\"::text,''), COALESCE(oa.\"agentEndPoint\", '')
+    psql -U credebl -d credebl -Atqc "
+      SELECT COALESCE(oa.\"agentSpinUpStatus\"::text, ''),
+             COALESCE(oa.\"agentEndPoint\", '')
       FROM organisation o
       LEFT JOIN org_agents oa ON oa.\"orgId\" = o.id
       WHERE o.name = 'Platform-admin'
-      LIMIT 1;
-    " 2>/dev/null | tr -d '\r')"
+      LIMIT 1;" 2>/dev/null | tr -d '\r')"
 
   status="${row%%|*}"
   endpoint="${row#*|}"
 
-  if [ "$status" != "2" ] || [ -z "$endpoint" ] || [ "$endpoint" = "http://" ] || [ "$endpoint" = "https://" ]; then
-    return 1
-  fi
+  [ "$status" != "2" ] && return 1
+  [ -z "$endpoint" ] || [ "$endpoint" = "http://" ] || [ "$endpoint" = "https://" ] && return 1
 
-  if [[ ! "$endpoint" =~ ^https?:// ]]; then
-    token_url="http://${endpoint}/agent/token"
-  else
-    token_url="${endpoint%/}/agent/token"
-  fi
+  [[ "$endpoint" =~ ^https?:// ]] \
+    && token_url="${endpoint%/}/agent/token" \
+    || token_url="http://${endpoint}/agent/token"
 
   curl -sf --max-time 8 -X POST -H "Authorization: $AGENT_API_KEY" "$token_url" >/dev/null
 }
 
 clear_stale_platform_admin_agent() {
   docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
-    psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -v ON_ERROR_STOP=1 -c "
+    psql -U credebl -d credebl -v ON_ERROR_STOP=1 -c "
       DELETE FROM org_agents oa
       USING organisation o
       WHERE oa.\"orgId\" = o.id
@@ -294,8 +202,7 @@ clear_stale_platform_admin_agent() {
         AND (
           oa.\"agentSpinUpStatus\" <> 2
           OR COALESCE(oa.\"agentEndPoint\", '') = ''
-        );
-    " >/dev/null
+        );" >/dev/null
 }
 
 ensure_platform_admin_shared_agent() {
@@ -303,21 +210,19 @@ ensure_platform_admin_shared_agent() {
   echo "Ensuring platform-admin shared agent is initialized..."
 
   if ! wait_for_container_state "credebl-platform-admin-bootstrap" '^exited 0$' 90; then
-    echo "Error: platform-admin-bootstrap did not complete successfully." >&2
+    echo "Error: platform-admin-bootstrap did not complete." >&2
     echo "Inspect with: docker compose logs --tail=200 platform-admin-bootstrap" >&2
     return 1
   fi
 
   local attempt=1
-  local max_attempts=12
-  while [ "$attempt" -le "$max_attempts" ]; do
+  while [ "$attempt" -le 12 ]; do
     if platform_admin_shared_agent_ready; then
       echo "Platform-admin shared agent is ready."
       return 0
     fi
 
-    echo "  Shared agent not ready yet (attempt $attempt/$max_attempts)."
-    echo "  Removing any stale partial Platform-admin agent record and restarting agent services..."
+    echo "  Not ready yet (attempt $attempt/12). Clearing stale record and restarting..."
     clear_stale_platform_admin_agent || true
     docker compose up -d cloud-wallet >/dev/null
     docker compose restart agent-provisioning agent-service >/dev/null
@@ -325,222 +230,268 @@ ensure_platform_admin_shared_agent() {
     attempt=$((attempt + 1))
   done
 
-  echo "Error: platform-admin shared agent did not reach DID_CREATED state." >&2
+  echo "Error: platform-admin shared agent did not reach ready state." >&2
   echo "Inspect with: docker compose logs --tail=200 agent-service agent-provisioning" >&2
-  echo "Verify runtime envs with: docker compose exec agent-service sh -lc 'env | grep -E \"^(PLATFORM_WALLET_NAME|PLATFORM_WALLET_PASSWORD|AGENT_API_KEY|WALLET_STORAGE_HOST|WALLET_STORAGE_PORT|WALLET_STORAGE_USER|WALLET_STORAGE_PASSWORD|SOCKET_HOST|AGENT_PROTOCOL|AFJ_VERSION)=\"'" >&2
-  echo "Verify platform_config with: docker compose exec -T postgres env PGPASSWORD=\"$POSTGRES_PASSWORD\" psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -Atqc 'SELECT \"externalIp\",\"inboundEndpoint\",\"apiEndpoint\" FROM platform_config LIMIT 1;'" >&2
   return 1
 }
 
-DEFAULT_HOST="$(curl -4 -fsS ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
-DEFAULT_HOST="$(sanitize_host "$DEFAULT_HOST")"
-DEFAULT_PROTOCOL="http"
-DEFAULT_POSTGRES_PASSWORD="$(openssl rand -hex 16)"
-DEFAULT_KEYCLOAK_ADMIN_PASSWORD="$(openssl rand -hex 16)"
-DEFAULT_PLATFORM_ADMIN_INITIAL_PASSWORD="changeme"
-DEFAULT_MINIO_ROOT_PASSWORD="$(openssl rand -hex 16)"
-DEFAULT_AWS_ACCESS_KEY_ID="credebls3"
-DEFAULT_AWS_SECRET_ACCESS_KEY="$(openssl rand -hex 16)"
-DEFAULT_KEYCLOAK_CLIENT_SECRET="$(openssl rand -hex 32)"
-DEFAULT_PLATFORM_SEED="$(openssl rand -hex 16)"
-DEFAULT_PLATFORM_WALLET_NAME="platformadminwallet"
-DEFAULT_PLATFORM_WALLET_PASSWORD="$(openssl rand -hex 16)"
-DEFAULT_AGENT_API_KEY="$(openssl rand -hex 32)"
-DEFAULT_JWT_SECRET="$(openssl rand -hex 32)"
-DEFAULT_NEXTAUTH_SECRET="$(openssl rand -hex 32)"
-DEFAULT_JWT_TOKEN_SECRET="$(openssl rand -base64 32 | tr -d '\n')"
-DEFAULT_SCHEMA_FILE_SERVER_ISSUER="Credebl"
-DEFAULT_PLATFORM_ADMIN_EMAIL="admin@cdpi-poc.local"
-DEFAULT_SUPPORT_EMAIL="support@cdpi-poc.local"
-DEFAULT_CRYPTO_PRIVATE_KEY="cdpi-poc-crypto-key-change-me"
+# =============================================================================
+# PREREQUISITE CHECKS
+# =============================================================================
 
-cat <<'EOF'
-============================================================
- CDPI PoC — CREDEBL interactive initializer
-============================================================
-This will:
-  1. Prompt for the required deployment values
-  2. Create/overwrite credebl/.env
-  3. Update the seed host values for this VPS
-  4. Pull/build/start the Docker stack
-============================================================
-EOF
+require_cmd docker
+require_cmd python3
+require_cmd openssl
+require_cmd curl
 
-echo
-PUBLIC_HOST="$(ask 'Public host or DNS name (without http://)' "$DEFAULT_HOST")"
-PUBLIC_HOST="$(sanitize_host "$PUBLIC_HOST")"
-PROTOCOL="$(ask 'Protocol for public URLs (http or https)' "$DEFAULT_PROTOCOL")"
-PROTOCOL="${PROTOCOL,,}"
-if [ "$PROTOCOL" != "http" ] && [ "$PROTOCOL" != "https" ]; then
-  echo "Error: protocol must be http or https." >&2
+if ! docker info >/dev/null 2>&1; then
+  echo "Error: Docker is not running or this user cannot access it." >&2
   exit 1
 fi
 
-POSTGRES_PASSWORD="$(ask 'Postgres password' "$DEFAULT_POSTGRES_PASSWORD" true)"
-KEYCLOAK_ADMIN_PASSWORD="$(ask 'Keycloak admin password' "$DEFAULT_KEYCLOAK_ADMIN_PASSWORD" true)"
-PLATFORM_ADMIN_INITIAL_PASSWORD="$(ask 'Initial Studio admin password' "$DEFAULT_PLATFORM_ADMIN_INITIAL_PASSWORD" true)"
-MINIO_ROOT_PASSWORD="$(ask 'MinIO root password' "$DEFAULT_MINIO_ROOT_PASSWORD" true)"
-AWS_ACCESS_KEY_ID="$(ask 'MinIO access key ID' "$DEFAULT_AWS_ACCESS_KEY_ID")"
-AWS_SECRET_ACCESS_KEY="$(ask 'MinIO secret access key' "$DEFAULT_AWS_SECRET_ACCESS_KEY" true)"
-KEYCLOAK_CLIENT_SECRET="$(ask 'Keycloak client secret' "$DEFAULT_KEYCLOAK_CLIENT_SECRET" true)"
-PLATFORM_SEED="$(ask 'Platform seed' "$DEFAULT_PLATFORM_SEED" true)"
-PLATFORM_WALLET_NAME="$(ask 'Platform shared-wallet name' "$DEFAULT_PLATFORM_WALLET_NAME")"
-PLATFORM_WALLET_PASSWORD="$(ask 'Platform shared-wallet password' "$DEFAULT_PLATFORM_WALLET_PASSWORD" true)"
-AGENT_API_KEY="$(ask 'Agent admin API key' "$DEFAULT_AGENT_API_KEY" true)"
-JWT_SECRET="$(ask 'JWT secret' "$DEFAULT_JWT_SECRET" true)"
-NEXTAUTH_SECRET="$(ask 'NextAuth secret' "$DEFAULT_NEXTAUTH_SECRET" true)"
-JWT_TOKEN_SECRET="$(ask 'JWT_TOKEN_SECRET (base64)' "$DEFAULT_JWT_TOKEN_SECRET" true)"
-SCHEMA_FILE_SERVER_ISSUER="$DEFAULT_SCHEMA_FILE_SERVER_ISSUER"
-PLATFORM_ADMIN_EMAIL="$(ask 'Platform admin email' "$DEFAULT_PLATFORM_ADMIN_EMAIL")"
-PUBLIC_PLATFORM_SUPPORT_EMAIL="$(ask 'Support email shown in the UI' "$DEFAULT_SUPPORT_EMAIL")"
-CRYPTO_PRIVATE_KEY="$(ask 'CRYPTO_PRIVATE_KEY' "$DEFAULT_CRYPTO_PRIVATE_KEY" true)"
+[ -f "$ENV_TEMPLATE" ] || { echo "Error: template not found at $ENV_TEMPLATE" >&2; exit 1; }
+[ -f "$MASTER_TABLE" ]  || { echo "Error: seed config not found at $MASTER_TABLE" >&2; exit 1; }
 
-ensure_alnum 'POSTGRES_PASSWORD' "$POSTGRES_PASSWORD"
-ensure_alnum 'KEYCLOAK_ADMIN_PASSWORD' "$KEYCLOAK_ADMIN_PASSWORD"
-ensure_alnum 'PLATFORM_ADMIN_INITIAL_PASSWORD' "$PLATFORM_ADMIN_INITIAL_PASSWORD"
-ensure_alnum 'MINIO_ROOT_PASSWORD' "$MINIO_ROOT_PASSWORD"
-ensure_alnum 'AWS_ACCESS_KEY_ID' "$AWS_ACCESS_KEY_ID"
-ensure_alnum 'AWS_SECRET_ACCESS_KEY' "$AWS_SECRET_ACCESS_KEY"
-ensure_alnum 'KEYCLOAK_CLIENT_SECRET' "$KEYCLOAK_CLIENT_SECRET"
-ensure_alnum 'PLATFORM_SEED' "$PLATFORM_SEED"
-ensure_alnum 'PLATFORM_WALLET_NAME' "$PLATFORM_WALLET_NAME"
-ensure_alnum 'PLATFORM_WALLET_PASSWORD' "$PLATFORM_WALLET_PASSWORD"
-ensure_alnum 'AGENT_API_KEY' "$AGENT_API_KEY"
-ensure_alnum 'JWT_SECRET' "$JWT_SECRET"
-ensure_alnum 'NEXTAUTH_SECRET' "$NEXTAUTH_SECRET"
+# =============================================================================
+# INTERACTIVE PROMPTS — 4 questions, 5 if SSL is requested
+# =============================================================================
 
-KEYCLOAK_MANAGEMENT_CLIENT_SECRET="$KEYCLOAK_CLIENT_SECRET"
-PLATFORM_ADMIN_KEYCLOAK_SECRET="$KEYCLOAK_CLIENT_SECRET"
-REDIS_PASSWORD=""
-KEYCLOAK_PUBLIC_URL="${PROTOCOL}://${PUBLIC_HOST}:8080"
-API_ENDPOINT="${PUBLIC_HOST}:5000"
-VPS_IP="$PUBLIC_HOST"
-PLATFORM_WEB_URL="${PROTOCOL}://${PUBLIC_HOST}:5000"
-FRONT_END_URL="$PLATFORM_WEB_URL"
-STUDIO_URL="${PROTOCOL}://${PUBLIC_HOST}:3000"
-SOCKET_HOST="$PLATFORM_WEB_URL"
-ENABLE_CORS_IP_LIST="${STUDIO_URL},http://localhost:3000,http://127.0.0.1:3000,https://localhost:3000,https://127.0.0.1:3000"
-APP_PROTOCOL="$PROTOCOL"
-AGENT_PROTOCOL="http"
-WALLET_STORAGE_HOST="$PUBLIC_HOST"
-WALLET_STORAGE_PORT="5432"
-WALLET_STORAGE_USER="credebl"
-WALLET_STORAGE_PASSWORD="$POSTGRES_PASSWORD"
-OOB_BATCH_SIZE="50"
-PROOF_REQ_CONN_LIMIT="50"
-SCHEMA_FILE_SERVER_URL="http://schema-file-server:4000/schemas/"
-SCHEMA_FILE_SERVER_TOKEN="$(generate_hs256_jwt "$JWT_TOKEN_SECRET" "$SCHEMA_FILE_SERVER_ISSUER")"
+cat <<'BANNER'
+============================================================
+ CDPI PoC — CREDEBL initializer
+============================================================
+ Answers 4 questions. All secrets are auto-generated and
+ printed in full at the end — save that report securely.
+============================================================
+BANNER
+echo
+
+# 1. VPS host — autodetect with fallback
+DETECTED_IP="$(curl -4 -fsS --max-time 5 ifconfig.me 2>/dev/null \
+  || hostname -I 2>/dev/null | awk '{print $1}' \
+  || true)"
+DETECTED_IP="$(sanitize_host "${DETECTED_IP:-}")"
+
+VPS_HOST="$(ask "VPS public IP or hostname (without http://)" "$DETECTED_IP")"
+VPS_HOST="$(sanitize_host "$VPS_HOST")"
+
+# 2. Keycloak host — default to same VPS but can be different
+KEYCLOAK_HOST="$(ask "Keycloak host (press Enter if same as VPS)" "$VPS_HOST")"
+KEYCLOAK_HOST="$(sanitize_host "$KEYCLOAK_HOST")"
+
+# 3. Platform admin email
+PLATFORM_ADMIN_EMAIL="$(ask "Platform admin email" "admin@cdpi-poc.local")"
+
+# 4. SSL / Let's Encrypt
+ENABLE_SSL=false
+SSL_DOMAIN=""
+if ask_yes_no "Enable HTTPS with a Let's Encrypt certificate for Keycloak?" "N"; then
+  ENABLE_SSL=true
+  # 5 (conditional). Domain for the cert
+  SSL_DOMAIN="$(ask "Domain name for the certificate (DNS must already point to this VPS)")"
+  SSL_DOMAIN="$(sanitize_host "$SSL_DOMAIN")"
+fi
+
+# =============================================================================
+# GENERATE ALL SECRETS
+# =============================================================================
+
+POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+KEYCLOAK_ADMIN_PASSWORD="$(openssl rand -hex 16)"
+KEYCLOAK_CLIENT_SECRET="$(openssl rand -hex 32)"
+PLATFORM_ADMIN_INITIAL_PASSWORD="$(openssl rand -hex 8)"   # 16 hex chars — easy to type
+MINIO_ROOT_PASSWORD="$(openssl rand -hex 16)"
+AWS_ACCESS_KEY_ID="credebls3"
+AWS_SECRET_ACCESS_KEY="$(openssl rand -hex 16)"
+PLATFORM_SEED="$(openssl rand -hex 16)"
+PLATFORM_WALLET_NAME="platformadminwallet"
+PLATFORM_WALLET_PASSWORD="$(openssl rand -hex 16)"
+AGENT_API_KEY="$(openssl rand -hex 32)"
+JWT_SECRET="$(openssl rand -hex 32)"
+NEXTAUTH_SECRET="$(openssl rand -hex 32)"
+# base64 required — schema-file-server decodes it before signing JWTs
+JWT_TOKEN_SECRET="$(openssl rand -base64 32 | tr -d '\n')"
+# CRYPTO_PRIVATE_KEY must match platformAdminData.password encryption in master-table.json
+# Keep the PoC default so the seeded admin password decrypts correctly on first boot
+CRYPTO_PRIVATE_KEY="cdpi-poc-crypto-key-change-me"
+
+# JWT signed with JWT_TOKEN_SECRET — required for W3C / did:web / did:key schema creation
+SCHEMA_FILE_SERVER_TOKEN="$(generate_hs256_jwt "$JWT_TOKEN_SECRET" "Credebl")"
+
+# =============================================================================
+# DERIVE ALL URLS
+# =============================================================================
+
+PROTOCOL="http"
+
+# Internal URLs — CREDEBL microservices reach Keycloak inside Docker
+if [ "$KEYCLOAK_HOST" = "$VPS_HOST" ]; then
+  # Same machine: use Docker service name for internal traffic
+  KEYCLOAK_DOMAIN_INTERNAL="http://keycloak:8080/"
+  KEYCLOAK_ADMIN_URL_INTERNAL="http://keycloak:8080"
+else
+  # External Keycloak: use its host directly
+  KEYCLOAK_DOMAIN_INTERNAL="http://${KEYCLOAK_HOST}:8080/"
+  KEYCLOAK_ADMIN_URL_INTERNAL="http://${KEYCLOAK_HOST}:8080"
+fi
+
+# Public URL — used by wallets and browsers; becomes HTTPS when SSL is enabled
+if [ "$ENABLE_SSL" = "true" ]; then
+  KEYCLOAK_PUBLIC_URL="https://${SSL_DOMAIN}"
+else
+  KEYCLOAK_PUBLIC_URL="http://${KEYCLOAK_HOST}:8080"
+fi
+
+# API and Studio always use HTTP on their ports for the PoC
+# (SSL is only for the Keycloak OIDC endpoint via nginx reverse proxy)
+STUDIO_URL="${PROTOCOL}://${VPS_HOST}:3000"
+API_ENDPOINT="${VPS_HOST}:5000"           # bare host:port — no protocol prefix
+PLATFORM_WEB_URL="${PROTOCOL}://${VPS_HOST}:5000"
+SOCKET_HOST="${PROTOCOL}://${VPS_HOST}:5000"
+ENABLE_CORS_IP_LIST="${STUDIO_URL},http://localhost:3000,http://127.0.0.1:3000"
+
+# =============================================================================
+# WRITE .env FROM TEMPLATE
+# =============================================================================
 
 if [ -f "$ENV_FILE" ]; then
-  if ask_yes_no "Existing $ENV_FILE found. Overwrite it?" "N"; then
-    :
-  else
-    echo "Aborted. Existing .env was left untouched."
+  if ! ask_yes_no "Existing $ENV_FILE found. Overwrite it?" "N"; then
+    echo "Aborted. Existing .env left untouched."
     exit 0
   fi
 fi
 
 export ENV_TEMPLATE ENV_FILE MASTER_TABLE \
-  POSTGRES_PASSWORD REDIS_PASSWORD KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_PUBLIC_URL \
-  KEYCLOAK_CLIENT_SECRET KEYCLOAK_MANAGEMENT_CLIENT_SECRET PLATFORM_ADMIN_KEYCLOAK_SECRET \
-  PLATFORM_ADMIN_INITIAL_PASSWORD PLATFORM_SEED PLATFORM_WALLET_NAME PLATFORM_WALLET_PASSWORD \
-  AGENT_API_KEY JWT_SECRET NEXTAUTH_SECRET API_ENDPOINT VPS_IP \
-  PLATFORM_WEB_URL FRONT_END_URL STUDIO_URL SOCKET_HOST ENABLE_CORS_IP_LIST APP_PROTOCOL AGENT_PROTOCOL \
-  MINIO_ROOT_PASSWORD AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY JWT_TOKEN_SECRET \
-  SCHEMA_FILE_SERVER_URL SCHEMA_FILE_SERVER_TOKEN SCHEMA_FILE_SERVER_ISSUER \
-  PLATFORM_ADMIN_EMAIL PUBLIC_PLATFORM_SUPPORT_EMAIL CRYPTO_PRIVATE_KEY PUBLIC_HOST PROTOCOL \
-  WALLET_STORAGE_HOST WALLET_STORAGE_PORT WALLET_STORAGE_USER WALLET_STORAGE_PASSWORD
-  OOB_BATCH_SIZE PROOF_REQ_CONN_LIMIT
+  POSTGRES_PASSWORD KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_CLIENT_SECRET \
+  PLATFORM_ADMIN_INITIAL_PASSWORD MINIO_ROOT_PASSWORD \
+  AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY \
+  PLATFORM_SEED PLATFORM_WALLET_NAME PLATFORM_WALLET_PASSWORD \
+  AGENT_API_KEY JWT_SECRET NEXTAUTH_SECRET JWT_TOKEN_SECRET \
+  SCHEMA_FILE_SERVER_TOKEN CRYPTO_PRIVATE_KEY \
+  PLATFORM_ADMIN_EMAIL VPS_HOST KEYCLOAK_HOST PROTOCOL \
+  KEYCLOAK_DOMAIN_INTERNAL KEYCLOAK_ADMIN_URL_INTERNAL KEYCLOAK_PUBLIC_URL \
+  STUDIO_URL API_ENDPOINT PLATFORM_WEB_URL SOCKET_HOST ENABLE_CORS_IP_LIST
 
 python3 <<'PY'
-import json
-import os
-import re
+import json, os, re
 from pathlib import Path
 
-env_template = Path(os.environ['ENV_TEMPLATE'])
-env_file = Path(os.environ['ENV_FILE'])
-master_table = Path(os.environ['MASTER_TABLE'])
+env_template = Path(os.environ["ENV_TEMPLATE"])
+env_file     = Path(os.environ["ENV_FILE"])
+master_table = Path(os.environ["MASTER_TABLE"])
+e = os.environ.__getitem__
 
-text = env_template.read_text(encoding='utf-8')
+text = env_template.read_text(encoding="utf-8")
+
+# Each entry replaces the matching KEY=... line in the template.
+# Derived compound values (DATABASE_URL, etc.) are computed here.
 replacements = {
-    'POSTGRES_PASSWORD': os.environ['POSTGRES_PASSWORD'],
-    'DATABASE_URL': f"postgresql://credebl:{os.environ['POSTGRES_PASSWORD']}@postgres:5432/credebl",
-    'POOL_DATABASE_URL': f"postgresql://credebl:{os.environ['POSTGRES_PASSWORD']}@postgres:5432/credebl",
-    'REDIS_PASSWORD': os.environ['REDIS_PASSWORD'],
-    'KEYCLOAK_ADMIN_PASSWORD': os.environ['KEYCLOAK_ADMIN_PASSWORD'],
-    'KEYCLOAK_PUBLIC_URL': os.environ['KEYCLOAK_PUBLIC_URL'],
-    'KEYCLOAK_CLIENT_SECRET': os.environ['KEYCLOAK_CLIENT_SECRET'],
-    'KEYCLOAK_MANAGEMENT_CLIENT_SECRET': os.environ['KEYCLOAK_MANAGEMENT_CLIENT_SECRET'],
-    'PLATFORM_ADMIN_KEYCLOAK_SECRET': os.environ['PLATFORM_ADMIN_KEYCLOAK_SECRET'],
-    'PLATFORM_ADMIN_INITIAL_PASSWORD': os.environ['PLATFORM_ADMIN_INITIAL_PASSWORD'],
-    'PLATFORM_SEED': os.environ['PLATFORM_SEED'],
-    'PLATFORM_WALLET_NAME': os.environ['PLATFORM_WALLET_NAME'],
-    'PLATFORM_WALLET_PASSWORD': os.environ['PLATFORM_WALLET_PASSWORD'],
-    'AGENT_API_KEY': os.environ['AGENT_API_KEY'],
-    'AGENT_PROTOCOL': os.environ['AGENT_PROTOCOL'],
-    'WALLET_STORAGE_HOST': os.environ['WALLET_STORAGE_HOST'],
-    'WALLET_STORAGE_PORT': os.environ['WALLET_STORAGE_PORT'],
-    'WALLET_STORAGE_USER': os.environ['WALLET_STORAGE_USER'],
-    'WALLET_STORAGE_PASSWORD': os.environ['WALLET_STORAGE_PASSWORD'],
-    'OOB_BATCH_SIZE': os.environ['OOB_BATCH_SIZE'],
-    'PROOF_REQ_CONN_LIMIT': os.environ['PROOF_REQ_CONN_LIMIT'],
-    'JWT_SECRET': os.environ['JWT_SECRET'],
-    'NEXTAUTH_SECRET': os.environ['NEXTAUTH_SECRET'],
-    'API_ENDPOINT': os.environ['API_ENDPOINT'],
-    'VPS_IP': os.environ['VPS_IP'],
-    'PLATFORM_WEB_URL': os.environ['PLATFORM_WEB_URL'],
-    'FRONT_END_URL': os.environ['FRONT_END_URL'],
-    'STUDIO_URL': os.environ['STUDIO_URL'],
-    'SOCKET_HOST': os.environ['SOCKET_HOST'],
-    'ENABLE_CORS_IP_LIST': os.environ['ENABLE_CORS_IP_LIST'],
-    'APP_PROTOCOL': os.environ['APP_PROTOCOL'],
-    'MINIO_ROOT_PASSWORD': os.environ['MINIO_ROOT_PASSWORD'],
-    'AWS_ACCESS_KEY_ID': os.environ['AWS_ACCESS_KEY_ID'],
-    'AWS_SECRET_ACCESS_KEY': os.environ['AWS_SECRET_ACCESS_KEY'],
-    'JWT_TOKEN_SECRET': os.environ['JWT_TOKEN_SECRET'],
-    'SCHEMA_FILE_SERVER_URL': os.environ['SCHEMA_FILE_SERVER_URL'],
-    'SCHEMA_FILE_SERVER_TOKEN': os.environ['SCHEMA_FILE_SERVER_TOKEN'],
-    'ISSUER': os.environ['SCHEMA_FILE_SERVER_ISSUER'],
-    'PLATFORM_ADMIN_EMAIL': os.environ['PLATFORM_ADMIN_EMAIL'],
-    'PUBLIC_PLATFORM_SUPPORT_EMAIL': os.environ['PUBLIC_PLATFORM_SUPPORT_EMAIL'],
-    'CRYPTO_PRIVATE_KEY': os.environ['CRYPTO_PRIVATE_KEY'],
+    "POSTGRES_PASSWORD":                e("POSTGRES_PASSWORD"),
+    "DATABASE_URL":                     f"postgresql://credebl:{e('POSTGRES_PASSWORD')}@postgres:5432/credebl",
+    "POOL_DATABASE_URL":                f"postgresql://credebl:{e('POSTGRES_PASSWORD')}@postgres:5432/credebl",
+    "KEYCLOAK_ADMIN_PASSWORD":          e("KEYCLOAK_ADMIN_PASSWORD"),
+    "KEYCLOAK_DOMAIN":                  e("KEYCLOAK_DOMAIN_INTERNAL"),
+    "KEYCLOAK_ADMIN_URL":               e("KEYCLOAK_ADMIN_URL_INTERNAL"),
+    "KEYCLOAK_CLIENT_SECRET":           e("KEYCLOAK_CLIENT_SECRET"),
+    "KEYCLOAK_MANAGEMENT_CLIENT_SECRET": e("KEYCLOAK_CLIENT_SECRET"),
+    "PLATFORM_ADMIN_KEYCLOAK_SECRET":   e("KEYCLOAK_CLIENT_SECRET"),
+    "KEYCLOAK_PUBLIC_URL":              e("KEYCLOAK_PUBLIC_URL"),
+    "PLATFORM_ADMIN_INITIAL_PASSWORD":  e("PLATFORM_ADMIN_INITIAL_PASSWORD"),
+    "MINIO_ROOT_PASSWORD":              e("MINIO_ROOT_PASSWORD"),
+    "AWS_ACCESS_KEY_ID":                e("AWS_ACCESS_KEY_ID"),
+    "AWS_SECRET_ACCESS_KEY":            e("AWS_SECRET_ACCESS_KEY"),
+    "AWS_S3_STOREOBJECT_ACCESS_KEY":    e("AWS_ACCESS_KEY_ID"),
+    "AWS_S3_STOREOBJECT_SECRET_KEY":    e("AWS_SECRET_ACCESS_KEY"),
+    "PLATFORM_SEED":                    e("PLATFORM_SEED"),
+    "PLATFORM_WALLET_NAME":             e("PLATFORM_WALLET_NAME"),
+    "PLATFORM_WALLET_PASSWORD":         e("PLATFORM_WALLET_PASSWORD"),
+    "AGENT_API_KEY":                    e("AGENT_API_KEY"),
+    "WALLET_STORAGE_HOST":              e("VPS_HOST"),
+    "WALLET_STORAGE_PASSWORD":          e("POSTGRES_PASSWORD"),
+    "JWT_SECRET":                       e("JWT_SECRET"),
+    "NEXTAUTH_SECRET":                  e("NEXTAUTH_SECRET"),
+    "JWT_TOKEN_SECRET":                 e("JWT_TOKEN_SECRET"),
+    "SCHEMA_FILE_SERVER_TOKEN":         e("SCHEMA_FILE_SERVER_TOKEN"),
+    "CRYPTO_PRIVATE_KEY":               e("CRYPTO_PRIVATE_KEY"),
+    "PLATFORM_ADMIN_EMAIL":             e("PLATFORM_ADMIN_EMAIL"),
+    "API_ENDPOINT":                     e("API_ENDPOINT"),
+    "VPS_IP":                           e("VPS_HOST"),
+    "PLATFORM_WEB_URL":                 e("PLATFORM_WEB_URL"),
+    "FRONT_END_URL":                    e("PLATFORM_WEB_URL"),
+    "STUDIO_URL":                       e("STUDIO_URL"),
+    "SOCKET_HOST":                      e("SOCKET_HOST"),
+    "ENABLE_CORS_IP_LIST":              e("ENABLE_CORS_IP_LIST"),
+    "APP_PROTOCOL":                     e("PROTOCOL"),
 }
 
 for key, value in replacements.items():
-    pattern = re.compile(rf'^{re.escape(key)}=.*$', re.MULTILINE)
-    text = pattern.sub(lambda _m, k=key, v=value: f'{k}={v}', text)
+    pattern = re.compile(rf"^{re.escape(key)}=.*$", re.MULTILINE)
+    text = pattern.sub(f"{key}={value}", text)
 
-env_file.write_text(text, encoding='utf-8')
+# Catch any remaining placeholder tokens not covered by key substitution above
+text = text.replace("YOUR_VPS_IP", e("VPS_HOST"))
+text = text.replace("YOUR_POSTGRES_PASSWORD", e("POSTGRES_PASSWORD"))
 
-config = json.loads(master_table.read_text(encoding='utf-8'))
-platform_config = config.get('platformConfigData', {})
-protocol = os.environ['PROTOCOL']
-host = os.environ['PUBLIC_HOST']
-# CREDEBL's AFJ bootstrap scripts expect bare host/IP values here, not full URLs.
-platform_config['externalIp'] = host
-platform_config['inboundEndpoint'] = host
-platform_config['apiEndpoint'] = f'{protocol}://{host}:5000'
-config['platformConfigData'] = platform_config
-master_table.write_text(json.dumps(config, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+env_file.write_text(text, encoding="utf-8")
+
+# Update platformConfigData in credebl-master-table.json with this VPS's host values.
+# CREDEBL's AFJ bootstrap expects bare host (no protocol) in externalIp / inboundEndpoint.
+config = json.loads(master_table.read_text(encoding="utf-8"))
+pc = config.setdefault("platformConfigData", {})
+pc["externalIp"]      = e("VPS_HOST")
+pc["inboundEndpoint"] = e("VPS_HOST")
+pc["apiEndpoint"]     = f"{e('PROTOCOL')}://{e('VPS_HOST')}:5000"
+config["platformConfigData"] = pc
+master_table.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 
-echo
-echo "Created $ENV_FILE and updated seed host values."
-echo "  Studio URL:   $STUDIO_URL"
-echo "  API URL:      $PLATFORM_WEB_URL"
-echo "  Keycloak URL: $KEYCLOAK_PUBLIC_URL"
-echo "  CORS origins: $ENABLE_CORS_IP_LIST"
-echo "  Schema URL:   $SCHEMA_FILE_SERVER_URL"
+echo "  .env written:          $ENV_FILE"
+echo "  master-table updated:  $MASTER_TABLE"
+
 write_agent_runtime_env
-echo "  Agent runtime: $AGENT_RUNTIME_ENV_FILE"
+echo "  agent runtime env:     $AGENT_RUNTIME_ENV_FILE"
+
+# =============================================================================
+# CREDENTIALS REPORT — print before any Docker operation
+# =============================================================================
+
 echo
+echo "============================================================"
+echo " CREDENTIALS REPORT — save this before continuing"
+echo "============================================================"
+printf " %-28s %s\n" "VPS host:"               "$VPS_HOST"
+printf " %-28s %s\n" "Keycloak host:"           "$KEYCLOAK_HOST"
+printf " %-28s %s\n" "Keycloak public URL:"     "$KEYCLOAK_PUBLIC_URL"
+printf " %-28s %s\n" "Studio URL:"              "$STUDIO_URL"
+printf " %-28s %s\n" "API URL:"                 "$PLATFORM_WEB_URL"
+echo " ----------------------------------------------------------"
+printf " %-28s %s\n" "Studio email:"            "$PLATFORM_ADMIN_EMAIL"
+printf " %-28s %s\n" "Studio password:"         "$PLATFORM_ADMIN_INITIAL_PASSWORD"
+echo " ----------------------------------------------------------"
+printf " %-28s %s\n" "Postgres password:"       "$POSTGRES_PASSWORD"
+printf " %-28s %s\n" "Keycloak admin password:" "$KEYCLOAK_ADMIN_PASSWORD"
+printf " %-28s %s\n" "Keycloak client secret:"  "$KEYCLOAK_CLIENT_SECRET"
+printf " %-28s %s\n" "MinIO root password:"     "$MINIO_ROOT_PASSWORD"
+printf " %-28s %s\n" "MinIO access key ID:"     "$AWS_ACCESS_KEY_ID"
+printf " %-28s %s\n" "MinIO secret key:"        "$AWS_SECRET_ACCESS_KEY"
+printf " %-28s %s\n" "Platform seed:"           "$PLATFORM_SEED"
+printf " %-28s %s\n" "Wallet password:"         "$PLATFORM_WALLET_PASSWORD"
+printf " %-28s %s\n" "Agent API key:"           "$AGENT_API_KEY"
+printf " %-28s %s\n" "JWT secret:"              "$JWT_SECRET"
+printf " %-28s %s\n" "NextAuth secret:"         "$NEXTAUTH_SECRET"
+printf " %-28s %s\n" "JWT token secret:"        "$JWT_TOKEN_SECRET"
+printf " %-28s %s\n" "Crypto private key:"      "$CRYPTO_PRIVATE_KEY"
+echo "============================================================"
+echo
+
+# =============================================================================
+# DOCKER DEPLOY
+# =============================================================================
 
 cd "$CREDEBL_DIR"
-
 mkdir -p .agent-runtime/agent-config .agent-runtime/token .agent-runtime/endpoints
 
-if ask_yes_no "Do a full clean reset first (down -v --remove-orphans)?" "Y"; then
+if ask_yes_no "Clean reset first? (docker compose down -v --remove-orphans)" "Y"; then
   docker compose down -v --remove-orphans
 fi
 
@@ -552,18 +503,43 @@ echo
 echo "Starting the stack..."
 docker compose up -d --build
 
-echo
 ensure_minio_setup
 
-echo
 ensure_platform_admin_shared_agent
 
-echo
-echo "Running health check..."
-bash ../scripts/health-check.sh
+# =============================================================================
+# SSL / HTTPS SETUP (only when requested)
+# =============================================================================
+
+if [ "$ENABLE_SSL" = "true" ]; then
+  echo
+  echo "Setting up HTTPS certificate for Keycloak ($SSL_DOMAIN)..."
+  echo "Note: requires sudo to install nginx and run certbot."
+  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    sudo bash "$SCRIPT_DIR/setup-keycloak-https.sh" \
+      --domain   "$SSL_DOMAIN" \
+      --email    "$PLATFORM_ADMIN_EMAIL" \
+      --credebl-dir "$CREDEBL_DIR"
+  else
+    bash "$SCRIPT_DIR/setup-keycloak-https.sh" \
+      --domain   "$SSL_DOMAIN" \
+      --email    "$PLATFORM_ADMIN_EMAIL" \
+      --credebl-dir "$CREDEBL_DIR"
+  fi
+fi
+
+# =============================================================================
+# HEALTH CHECK + FINAL SUMMARY
+# =============================================================================
 
 echo
-echo "Deployment completed."
-echo "Studio login:"
-echo "  Email:    $PLATFORM_ADMIN_EMAIL"
-echo "  Password: $PLATFORM_ADMIN_INITIAL_PASSWORD"
+bash "$SCRIPT_DIR/health-check.sh"
+
+echo
+echo "============================================================"
+echo " Deployment complete"
+echo "============================================================"
+printf " %-20s %s\n" "Studio:" "$STUDIO_URL"
+printf " %-20s %s\n" "Email:"  "$PLATFORM_ADMIN_EMAIL"
+printf " %-20s %s\n" "Password:" "$PLATFORM_ADMIN_INITIAL_PASSWORD"
+echo "============================================================"
