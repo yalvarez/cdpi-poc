@@ -69,11 +69,9 @@ const SCHEMA_CONTEXT_BASE_URL = normalizeSchemaBaseUrl(
 )
 
 const ensureTrailingSlash = (value: string): string =>
-  value.endsWith('/') ? value : `${value}/`
+  (value.endsWith('/') ? value : `${value}/`)
 
-const normalizeSchemaContextUrl = (
-  candidate?: string,
-): string | undefined => {
+const normalizeSchemaContextUrl = (candidate?: string): string | undefined => {
   const trimmed = candidate?.trim()
   if (!trimmed) {
     return undefined
