@@ -313,7 +313,7 @@ services:
     # extra_hosts maps it to host-gateway so containers reach nginx (→ Keycloak)
     # via the Docker bridge instead of trying the public IP directly.
     extra_hosts:
-      - "${VPS_HOST}:host-gateway"
+      - "${VPS_IP}:host-gateway"
     ports:
       - "5000:5000"
     depends_on:
@@ -422,7 +422,7 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_HOST}:host-gateway"
+      - "${VPS_IP}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
@@ -466,7 +466,7 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_HOST}:host-gateway"
+      - "${VPS_IP}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
@@ -490,7 +490,7 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_HOST}:host-gateway"
+      - "${VPS_IP}:host-gateway"
     environment:
       OOB_BATCH_SIZE: ${OOB_BATCH_SIZE:-50}
     depends_on:
@@ -518,7 +518,7 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_HOST}:host-gateway"
+      - "${VPS_IP}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
@@ -544,7 +544,7 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_HOST}:host-gateway"
+      - "${VPS_IP}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
@@ -572,7 +572,7 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_HOST}:host-gateway"
+      - "${VPS_IP}:host-gateway"
     environment:
       PROOF_REQ_CONN_LIMIT: ${PROOF_REQ_CONN_LIMIT:-50}
     depends_on:
@@ -695,7 +695,7 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_HOST}:host-gateway"
+      - "${VPS_IP}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
