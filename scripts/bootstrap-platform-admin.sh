@@ -120,6 +120,19 @@ psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -v ON_ERROR_STOP=1 \
   -c "UPDATE \"user\" SET \"keycloakUserId\"='${KC_USER_ID}' WHERE email='${PLATFORM_ADMIN_EMAIL}';"
 
+echo "==> Ensuring DEFAULT_USER role is assigned in user_role_mapping"
+psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -v ON_ERROR_STOP=1 \
+  -c "INSERT INTO user_role_mapping (id, \"userId\", \"userRoleId\")
+      SELECT gen_random_uuid(), u.id, ur.id
+      FROM \"user\" u, user_role ur
+      WHERE u.email='${PLATFORM_ADMIN_EMAIL}'
+        AND ur.role='DEFAULT_USER'
+        AND NOT EXISTS (
+          SELECT 1 FROM user_role_mapping
+          WHERE \"userId\"=u.id AND \"userRoleId\"=ur.id
+        );"
+
 echo "==> Syncing platform configuration endpoints in Postgres"
 psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -v ON_ERROR_STOP=1 \
