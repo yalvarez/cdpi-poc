@@ -416,6 +416,7 @@ replacements = {
     "JWT_TOKEN_SECRET":                 e("JWT_TOKEN_SECRET"),
     "SCHEMA_FILE_SERVER_TOKEN":         e("SCHEMA_FILE_SERVER_TOKEN"),
     "CRYPTO_PRIVATE_KEY":               e("CRYPTO_PRIVATE_KEY"),
+    "NEXTAUTH_COOKIE_DOMAIN":           "",
     "PLATFORM_ADMIN_EMAIL":             e("PLATFORM_ADMIN_EMAIL"),
     "API_ENDPOINT":                     e("API_ENDPOINT"),
     "VPS_IP":                           e("VPS_HOST"),
