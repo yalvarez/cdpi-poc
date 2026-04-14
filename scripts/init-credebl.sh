@@ -193,6 +193,7 @@ platform_admin_shared_agent_ready() {
 }
 
 clear_stale_platform_admin_agent() {
+  # Remove the incomplete org_agents record so agent-service will try again.
   docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
     psql -U credebl -d credebl -v ON_ERROR_STOP=1 -c "
       DELETE FROM org_agents oa
@@ -203,6 +204,17 @@ clear_stale_platform_admin_agent() {
           oa.\"agentSpinUpStatus\" <> 2
           OR COALESCE(oa.\"agentEndPoint\", '') = ''
         );" >/dev/null
+
+  # Credo (askar) creates a separate PostgreSQL database named after the wallet.
+  # If a previous provision attempt failed mid-way, that database still exists and
+  # the next attempt throws "Your wallet is already been created". Drop it so the
+  # next agent-service startup can provision the wallet cleanly from scratch.
+  docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d postgres -c "
+      SELECT pg_terminate_backend(pid)
+      FROM pg_stat_activity
+      WHERE datname = '${PLATFORM_WALLET_NAME}';
+      DROP DATABASE IF EXISTS \"${PLATFORM_WALLET_NAME}\";" >/dev/null 2>&1 || true
 }
 
 ensure_platform_admin_shared_agent() {
