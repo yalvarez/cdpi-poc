@@ -437,14 +437,22 @@ text = text.replace("YOUR_POSTGRES_PASSWORD", e("POSTGRES_PASSWORD"))
 
 env_file.write_text(text, encoding="utf-8")
 
-# Update platformConfigData in credebl-master-table.json with this VPS's host values.
-# CREDEBL's AFJ bootstrap expects bare host (no protocol) in externalIp / inboundEndpoint.
+# Update credebl-master-table.json with VPS host values and the chosen admin email.
+# platformAdminData.email/username must match PLATFORM_ADMIN_EMAIL so the seed creates
+# the right user — the bootstrap then links that DB user to the Keycloak user by the same email.
 config = json.loads(master_table.read_text(encoding="utf-8"))
+
 pc = config.setdefault("platformConfigData", {})
 pc["externalIp"]      = e("VPS_HOST")
 pc["inboundEndpoint"] = e("VPS_HOST")
 pc["apiEndpoint"]     = f"{e('PROTOCOL')}://{e('VPS_HOST')}:5000"
 config["platformConfigData"] = pc
+
+pa = config.setdefault("platformAdminData", {})
+pa["email"]    = e("PLATFORM_ADMIN_EMAIL")
+pa["username"] = e("PLATFORM_ADMIN_EMAIL")
+config["platformAdminData"] = pa
+
 master_table.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 
