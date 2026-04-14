@@ -376,7 +376,7 @@ verify_proxy_setup() {
 update_credebl_env() {
   local env_file="$CREDEBL_DIR/.env"
   if [[ ! -f "$env_file" ]]; then
-    warn "No .env file found at $env_file; skipping KEYCLOAK_PUBLIC_URL update."
+    warn "No .env file found at $env_file; skipping env update."
     return
   fi
 
@@ -386,6 +386,29 @@ update_credebl_env() {
   else
     printf '\nKEYCLOAK_PUBLIC_URL=https://%s\n' "$DOMAIN" >> "$env_file"
   fi
+
+  # KEYCLOAK_DOMAIN must match the issuer claim in Keycloak-issued JWTs.
+  # After SSL setup Keycloak emits iss: https://<domain>/realms/... — CREDEBL
+  # services validate the iss claim against KEYCLOAK_DOMAIN, so they must agree.
+  # Services reach this URL via the Docker bridge gateway (extra_hosts in compose).
+  log "Updating KEYCLOAK_DOMAIN to match the HTTPS issuer in $env_file"
+  if grep -q '^KEYCLOAK_DOMAIN=' "$env_file"; then
+    sed -i "s|^KEYCLOAK_DOMAIN=.*|KEYCLOAK_DOMAIN=https://$DOMAIN/|" "$env_file"
+  else
+    printf '\nKEYCLOAK_DOMAIN=https://%s/\n' "$DOMAIN" >> "$env_file"
+  fi
+}
+
+restart_credebl_services() {
+  if [[ ! -f "$CREDEBL_DIR/docker-compose.yml" ]]; then
+    warn "No docker-compose.yml found; skipping CREDEBL service restart."
+    return
+  fi
+  log "Restarting CREDEBL microservices so updated KEYCLOAK_DOMAIN takes effect..."
+  (
+    cd "$CREDEBL_DIR"
+    docker compose restart api-gateway user organization issuance verification ledger connection cloud-wallet
+  )
 }
 
 normalize_utf8_file() {
@@ -510,6 +533,7 @@ main() {
   restart_keycloak
   wait_for_keycloak
   verify_proxy_setup
+  restart_credebl_services
   print_summary
 }
 

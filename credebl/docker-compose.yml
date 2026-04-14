@@ -309,6 +309,11 @@ services:
     environment:
       OOB_BATCH_SIZE: ${OOB_BATCH_SIZE:-50}
       PROOF_REQ_CONN_LIMIT: ${PROOF_REQ_CONN_LIMIT:-50}
+    # When SSL is enabled, KEYCLOAK_DOMAIN points to the public HTTPS domain.
+    # extra_hosts maps it to host-gateway so containers reach nginx (→ Keycloak)
+    # via the Docker bridge instead of trying the public IP directly.
+    extra_hosts:
+      - "${VPS_HOST}:host-gateway"
     ports:
       - "5000:5000"
     depends_on:
@@ -416,6 +421,8 @@ services:
     container_name: credebl-user
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "${VPS_HOST}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
@@ -458,6 +465,8 @@ services:
     container_name: credebl-connection
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "${VPS_HOST}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
@@ -480,6 +489,8 @@ services:
     container_name: credebl-issuance
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "${VPS_HOST}:host-gateway"
     environment:
       OOB_BATCH_SIZE: ${OOB_BATCH_SIZE:-50}
     depends_on:
@@ -506,6 +517,8 @@ services:
     container_name: credebl-ledger
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "${VPS_HOST}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
@@ -530,6 +543,8 @@ services:
     container_name: credebl-organization
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "${VPS_HOST}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
@@ -556,6 +571,8 @@ services:
     container_name: credebl-verification
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "${VPS_HOST}:host-gateway"
     environment:
       PROOF_REQ_CONN_LIMIT: ${PROOF_REQ_CONN_LIMIT:-50}
     depends_on:
@@ -677,6 +694,8 @@ services:
     container_name: credebl-cloud-wallet
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "${VPS_HOST}:host-gateway"
     depends_on:
       nats:
         condition: service_healthy
