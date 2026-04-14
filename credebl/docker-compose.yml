@@ -264,6 +264,12 @@ services:
       npx prisma migrate deploy --schema=./libs/prisma-service/prisma/schema.prisma &&
       npx ts-node ./libs/prisma-service/prisma/seed.ts'
     env_file: .env
+    environment:
+      # The seed container reaches Keycloak only for initial user creation — it does
+      # not validate JWT iss claims. Always use the internal Docker URL so the seed
+      # works regardless of whether SSL is enabled on the public Keycloak domain.
+      KEYCLOAK_DOMAIN: "http://keycloak:8080/"
+      KEYCLOAK_ADMIN_URL: "http://keycloak:8080"
     volumes:
       - ./config/credebl-master-table.json:/app/prisma/data/credebl-master-table/credebl-master-table.json:ro
     depends_on:
