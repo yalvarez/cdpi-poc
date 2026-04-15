@@ -192,6 +192,37 @@ platform_admin_shared_agent_ready() {
   curl -sf --max-time 8 -X POST -H "Authorization: $AGENT_API_KEY" "$token_url" >/dev/null
 }
 
+# Kill all Credo controller containers that were spawned outside of docker compose.
+# Uses two complementary strategies because the image-ancestor filter alone is unreliable:
+#   1. Ancestor filter — works when the image tag hasn't changed.
+#   2. Name pattern  — agent-provisioning always names these containers as
+#      "{org-uuid}_{ContainerName}" (e.g. "c1f8a28f-71a3-..._Platform-admin").
+#      Matching on the UUID prefix catches them regardless of image tag or pull history.
+purge_stale_credo_containers() {
+  local found=0 names
+
+  names=$(docker ps -a \
+    --filter "ancestor=ghcr.io/credebl/credo-controller:latest" \
+    --format "{{.Names}}" 2>/dev/null || true)
+  if [ -n "$names" ]; then
+    echo "$names" | xargs docker rm -f 2>/dev/null || true
+    echo "  Removed by image: $(printf '%s' "$names" | tr '\n' ' ')"
+    found=1
+  fi
+
+  # UUID name pattern: 8-4-4-4-12 hex digits followed by underscore
+  names=$(docker ps -a --format "{{.Names}}" 2>/dev/null \
+    | grep -E "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_" \
+    || true)
+  if [ -n "$names" ]; then
+    echo "$names" | xargs docker rm -f 2>/dev/null || true
+    echo "  Removed by name pattern: $(printf '%s' "$names" | tr '\n' ' ')"
+    found=1
+  fi
+
+  [ "$found" -eq 0 ] && echo "  No stale Credo containers found."
+}
+
 clear_stale_platform_admin_agent() {
   # Remove the incomplete org_agents record so agent-service will try again.
   docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
@@ -234,14 +265,15 @@ ensure_platform_admin_shared_agent() {
       return 0
     fi
 
-    echo "  Not ready yet (attempt $attempt/12). Clearing stale record and restarting..."
+    echo "  Not ready yet (attempt $attempt/12). Clearing stale state and restarting..."
     clear_stale_platform_admin_agent || true
-    # Also remove any stale Credo containers blocking the agent ports
-    docker ps -a --filter "ancestor=ghcr.io/credebl/credo-controller:latest" \
-      --format "{{.Names}}" 2>/dev/null | xargs -r docker rm -f || true
+    purge_stale_credo_containers
     docker compose up -d cloud-wallet >/dev/null
     docker compose restart agent-provisioning agent-service >/dev/null
-    sleep 10
+    # The full provision cycle takes ~40s: Nest startup + Prisma migrate + wallet init + agent start.
+    # Waiting only 10s means we restart again before the previous attempt finishes, making it worse.
+    echo "  Waiting 50s for provisioning cycle to complete..."
+    sleep 50
     attempt=$((attempt + 1))
   done
 
@@ -535,19 +567,11 @@ fi
 
 # Remove any stale Credo controller containers left over from previous deployments.
 # These are spawned by agent-provisioning via `docker run` (outside compose scope),
-# so `docker compose down` never removes them. If they hold ports 8001/9001, the
-# new spin-up will fail silently with `error in wallet provision : {}`.
+# so `docker compose down` never removes them. If they hold ports 8001-9099, the
+# new spin-up will fail with "port is already allocated".
 echo
 echo "Cleaning up stale Credo controller containers from previous deployments..."
-STALE_CREDO=$(docker ps -a \
-  --filter "ancestor=ghcr.io/credebl/credo-controller:latest" \
-  --format "{{.Names}}" 2>/dev/null || true)
-if [ -n "$STALE_CREDO" ]; then
-  echo "$STALE_CREDO" | xargs docker rm -f
-  echo "  Removed: $STALE_CREDO"
-else
-  echo "  No stale Credo containers found."
-fi
+purge_stale_credo_containers
 
 echo
 echo "Pulling images..."
