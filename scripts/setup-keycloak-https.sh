@@ -30,6 +30,8 @@ set -euo pipefail
 DOMAIN=""
 EMAIL=""
 KEYCLOAK_PORT="8080"
+VPS_DOMAIN=""
+VPS_PORT="5000"
 CREDEBL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../credebl" && pwd)"
 SKIP_CERTBOT=0
 CERTBOT_WEBROOT="/var/www/certbot"
@@ -43,6 +45,8 @@ Required:
   --email <email>           Email used for Let's Encrypt renewal notices
 
 Optional:
+  --vps-domain <fqdn>       General VPS domain for API/Studio (e.g. api.example.org)
+  --vps-port <port>         Local backend port for the VPS domain (default: 5000)
   --keycloak-port <port>    Local Keycloak port behind Nginx (default: 8080)
   --credebl-dir <path>      Path to the credebl folder (default: ../credebl)
   --skip-certbot            Only configure Nginx, skip certificate issuance
@@ -51,6 +55,7 @@ Optional:
 Example:
   sudo ./scripts/setup-keycloak-https.sh \
     --domain auth.example.org \
+    --vps-domain api.example.org \
     --email ops@example.org
 EOF
 }
@@ -90,6 +95,14 @@ parse_args() {
         EMAIL="${2:-}"
         shift 2
         ;;
+      --vps-domain)
+        VPS_DOMAIN="${2:-}"
+        shift 2
+        ;;
+      --vps-port)
+        VPS_PORT="${2:-}"
+        shift 2
+        ;;
       --keycloak-port)
         KEYCLOAK_PORT="${2:-}"
         shift 2
@@ -118,28 +131,35 @@ parse_args() {
   fi
 }
 
-check_dns() {
-  local server_ip=""
-  local resolved_ip=""
+check_dns_for() {
+  local domain="$1"
+  local server_ip="${2:-}"
+  local resolved_ip
 
-  server_ip=$(curl -4 -fsSL ifconfig.me 2>/dev/null || true)
-  resolved_ip=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk 'NR==1 {print $1}')
+  resolved_ip=$(getent ahostsv4 "$domain" 2>/dev/null | awk 'NR==1 {print $1}')
 
   if [[ -z "$resolved_ip" ]]; then
     if [[ "$SKIP_CERTBOT" -eq 1 ]]; then
-      warn "Domain '$DOMAIN' does not resolve yet. Continuing because --skip-certbot was used."
+      warn "Domain '$domain' does not resolve yet. Continuing because --skip-certbot was used."
       return
     fi
-    die "Domain '$DOMAIN' does not resolve yet. Dependencies were installed, but DNS must point to this VPS before certificate issuance can succeed."
+    die "Domain '$domain' does not resolve yet. DNS must point to this VPS before certificate issuance can succeed."
   fi
 
-  log "Domain resolves to: $resolved_ip"
-  if [[ -n "$server_ip" ]]; then
-    log "Server public IP:    $server_ip"
-    if [[ "$resolved_ip" != "$server_ip" ]]; then
-      warn "DNS does not appear to point to this server yet. Certbot may fail until DNS propagates."
-    fi
+  log "  $domain -> $resolved_ip"
+  if [[ -n "$server_ip" && "$resolved_ip" != "$server_ip" ]]; then
+    warn "DNS for '$domain' does not point to this server ($server_ip) yet. Certbot may fail until DNS propagates."
   fi
+}
+
+check_dns() {
+  local server_ip
+  server_ip=$(curl -4 -fsSL ifconfig.me 2>/dev/null || true)
+  [[ -n "$server_ip" ]] && log "Server public IP: $server_ip"
+
+  log "Checking DNS resolution..."
+  check_dns_for "$DOMAIN" "$server_ip"
+  [[ -n "$VPS_DOMAIN" && "$VPS_DOMAIN" != "$DOMAIN" ]] && check_dns_for "$VPS_DOMAIN" "$server_ip"
 }
 
 install_packages() {
@@ -193,6 +213,23 @@ cert_paths_exist() {
   [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" && -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" ]]
 }
 
+# Returns 0 if the domain already has a valid certificate with at least 24 h remaining.
+cert_is_valid() {
+  local domain="$1"
+  local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+  local key="/etc/letsencrypt/live/${domain}/privkey.pem"
+  [[ -f "$cert" && -f "$key" ]] && \
+    openssl x509 -checkend 86400 -noout -in "$cert" 2>/dev/null
+}
+
+vps_site_name() {
+  echo "vps-${VPS_DOMAIN//./-}"
+}
+
+vps_conf_path() {
+  echo "/etc/nginx/sites-available/$(vps_site_name).conf"
+}
+
 reload_nginx() {
   nginx -t
   if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^nginx.service'; then
@@ -206,17 +243,22 @@ reload_nginx() {
 }
 
 disable_conflicting_sites() {
-  local desired_conf
-  desired_conf="$(conf_path)"
+  local desired_kc_conf desired_vps_conf
+  desired_kc_conf="$(conf_path)"
+  desired_vps_conf="$(vps_conf_path)"
 
-  log "Disabling default/conflicting Nginx sites for ${DOMAIN}"
+  log "Disabling default/conflicting Nginx sites..."
   rm -f /etc/nginx/sites-enabled/default
 
   while IFS= read -r enabled_site; do
     [[ -n "$enabled_site" ]] || continue
-    [[ "$enabled_site" == "$desired_conf" ]] && continue
+    [[ "$enabled_site" == "$desired_kc_conf" ]] && continue
+    [[ -n "$VPS_DOMAIN" && "$enabled_site" == "$desired_vps_conf" ]] && continue
 
-    if grep -Eq "server_name[[:space:]].*${DOMAIN}" "$enabled_site" 2>/dev/null; then
+    local pattern="$DOMAIN"
+    [[ -n "$VPS_DOMAIN" ]] && pattern="${DOMAIN}|${VPS_DOMAIN}"
+
+    if grep -Eq "server_name[[:space:]].*($pattern)" "$enabled_site" 2>/dev/null; then
       warn "Disabling conflicting Nginx site: $enabled_site"
       rm -f "$enabled_site"
     fi
@@ -317,23 +359,123 @@ EOF
   reload_nginx
 }
 
+write_nginx_vps_http_config() {
+  [[ -z "$VPS_DOMAIN" ]] && return
+  local vps_conf
+  vps_conf="$(vps_conf_path)"
+  mkdir -p "$CERTBOT_WEBROOT"
+  log "Writing HTTP Nginx site config for VPS domain: $vps_conf"
+  cat > "$vps_conf" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${VPS_DOMAIN};
+
+    client_max_body_size 25m;
+
+    location /.well-known/acme-challenge/ {
+        root ${CERTBOT_WEBROOT};
+        default_type "text/plain";
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:${VPS_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port 80;
+        proxy_buffering off;
+    }
+}
+EOF
+  ln -sfn "$vps_conf" "/etc/nginx/sites-enabled/$(vps_site_name).conf"
+  reload_nginx
+}
+
+write_nginx_vps_https_config() {
+  [[ -z "$VPS_DOMAIN" ]] && return
+  local vps_conf
+  vps_conf="$(vps_conf_path)"
+  if [[ ! -f "/etc/letsencrypt/live/${VPS_DOMAIN}/fullchain.pem" ]]; then
+    warn "TLS certificate for ${VPS_DOMAIN} not present; leaving HTTP proxy config in place."
+    return
+  fi
+  log "Writing HTTPS Nginx site config for VPS domain: $vps_conf"
+  cat > "$vps_conf" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${VPS_DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root ${CERTBOT_WEBROOT};
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${VPS_DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${VPS_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${VPS_DOMAIN}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${VPS_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_buffering off;
+    }
+}
+EOF
+  ln -sfn "$vps_conf" "/etc/nginx/sites-enabled/$(vps_site_name).conf"
+  reload_nginx
+}
+
 issue_certificate() {
   if [[ "$SKIP_CERTBOT" -eq 1 ]]; then
-    warn "Skipping Certbot by request. Site will remain HTTP-only until you issue a certificate."
+    warn "Skipping Certbot by request. Sites will remain HTTP-only until you issue a certificate."
     return
   fi
 
   mkdir -p "$CERTBOT_WEBROOT"
 
-  log "Requesting Let's Encrypt certificate for $DOMAIN using the webroot method"
-  certbot certonly \
-    --webroot \
-    -w "$CERTBOT_WEBROOT" \
-    --non-interactive \
-    --agree-tos \
-    --keep-until-expiring \
-    -m "$EMAIL" \
-    -d "$DOMAIN"
+  # Build the list of domains that need a certificate
+  local all_domains=("$DOMAIN")
+  [[ -n "$VPS_DOMAIN" && "$VPS_DOMAIN" != "$DOMAIN" ]] && all_domains+=("$VPS_DOMAIN")
+
+  for domain in "${all_domains[@]}"; do
+    if cert_is_valid "$domain"; then
+      log "Certificate for $domain is already valid (>24 h remaining) — skipping issuance."
+      continue
+    fi
+    log "Requesting Let's Encrypt certificate for $domain using the webroot method"
+    certbot certonly \
+      --webroot \
+      -w "$CERTBOT_WEBROOT" \
+      --non-interactive \
+      --agree-tos \
+      --keep-until-expiring \
+      -m "$EMAIL" \
+      -d "$domain"
+  done
 }
 
 verify_proxy_setup() {
@@ -494,12 +636,19 @@ wait_for_keycloak() {
 print_summary() {
   echo ""
   echo "============================================================"
-  echo " Keycloak HTTPS setup complete"
+  echo " HTTPS setup complete"
   echo "============================================================"
   if cert_paths_exist && [[ "$SKIP_CERTBOT" -eq 0 ]]; then
-    echo " URL: https://$DOMAIN"
+    echo " Keycloak: https://$DOMAIN"
   else
-    echo " URL: http://$DOMAIN"
+    echo " Keycloak: http://$DOMAIN"
+  fi
+  if [[ -n "$VPS_DOMAIN" ]]; then
+    if cert_is_valid "$VPS_DOMAIN" || [[ -f "/etc/letsencrypt/live/${VPS_DOMAIN}/fullchain.pem" ]]; then
+      echo " VPS API:  https://$VPS_DOMAIN"
+    else
+      echo " VPS API:  http://$VPS_DOMAIN (no certificate yet)"
+    fi
   fi
   echo ""
   echo " Next steps:"
@@ -526,8 +675,10 @@ main() {
   check_dns
   disable_conflicting_sites
   write_nginx_http_config
+  write_nginx_vps_http_config
   issue_certificate
   write_nginx_https_config
+  write_nginx_vps_https_config
   update_credebl_env
   validate_compose_file
   restart_keycloak

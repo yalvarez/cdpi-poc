@@ -299,12 +299,26 @@ PLATFORM_ADMIN_EMAIL="$(ask "Platform admin email" "admin@cdpi-poc.local")"
 
 # 4. SSL / Let's Encrypt
 ENABLE_SSL=false
-SSL_DOMAIN=""
-if ask_yes_no "Enable HTTPS with a Let's Encrypt certificate for Keycloak?" "N"; then
+SSL_KEYCLOAK_DOMAIN=""
+SSL_VPS_DOMAIN=""
+if ask_yes_no "Enable HTTPS with Let's Encrypt certificates?" "N"; then
   ENABLE_SSL=true
-  # 5 (conditional). Domain for the cert
-  SSL_DOMAIN="$(ask "Domain name for the certificate (DNS must already point to this VPS)")"
-  SSL_DOMAIN="$(sanitize_host "$SSL_DOMAIN")"
+
+  # 5a. Keycloak domain — suggest KEYCLOAK_HOST only if it looks like an FQDN, not a raw IP
+  _kc_default="$KEYCLOAK_HOST"
+  printf '%s' "$KEYCLOAK_HOST" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' && _kc_default=""
+  SSL_KEYCLOAK_DOMAIN="$(ask "Keycloak domain for the SSL certificate (DNS must point to this VPS)" "$_kc_default")"
+  SSL_KEYCLOAK_DOMAIN="$(sanitize_host "$SSL_KEYCLOAK_DOMAIN")"
+
+  # 5b. General VPS domain (optional) — for API Gateway / Studio; skipped when same as Keycloak domain
+  _vps_default="$VPS_HOST"
+  printf '%s' "$VPS_HOST" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' && _vps_default=""
+  if [ -z "$_vps_default" ] || [ "$_vps_default" != "$SSL_KEYCLOAK_DOMAIN" ]; then
+    if ask_yes_no "Also issue an SSL certificate for the general VPS domain (API / Studio)?" "N"; then
+      SSL_VPS_DOMAIN="$(ask "General VPS domain for the SSL certificate (DNS must point to this VPS)" "$_vps_default")"
+      SSL_VPS_DOMAIN="$(sanitize_host "$SSL_VPS_DOMAIN")"
+    fi
+  fi
 fi
 
 # =============================================================================
@@ -352,7 +366,7 @@ fi
 
 # Public URL — used by wallets and browsers; becomes HTTPS when SSL is enabled
 if [ "$ENABLE_SSL" = "true" ]; then
-  KEYCLOAK_PUBLIC_URL="https://${SSL_DOMAIN}"
+  KEYCLOAK_PUBLIC_URL="https://${SSL_KEYCLOAK_DOMAIN}"
 else
   KEYCLOAK_PUBLIC_URL="http://${KEYCLOAK_HOST}:8080"
 fi
@@ -553,18 +567,22 @@ ensure_platform_admin_shared_agent
 
 if [ "$ENABLE_SSL" = "true" ]; then
   echo
-  echo "Setting up HTTPS certificate for Keycloak ($SSL_DOMAIN)..."
+  _ssl_label="$SSL_KEYCLOAK_DOMAIN"
+  [ -n "$SSL_VPS_DOMAIN" ] && _ssl_label="$_ssl_label + $SSL_VPS_DOMAIN"
+  echo "Setting up HTTPS certificates for: $_ssl_label ..."
   echo "Note: requires sudo to install nginx and run certbot."
+
+  _ssl_args=(
+    --domain      "$SSL_KEYCLOAK_DOMAIN"
+    --email       "$PLATFORM_ADMIN_EMAIL"
+    --credebl-dir "$CREDEBL_DIR"
+  )
+  [ -n "$SSL_VPS_DOMAIN" ] && _ssl_args+=(--vps-domain "$SSL_VPS_DOMAIN")
+
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    sudo bash "$SCRIPT_DIR/setup-keycloak-https.sh" \
-      --domain   "$SSL_DOMAIN" \
-      --email    "$PLATFORM_ADMIN_EMAIL" \
-      --credebl-dir "$CREDEBL_DIR"
+    sudo bash "$SCRIPT_DIR/setup-keycloak-https.sh" "${_ssl_args[@]}"
   else
-    bash "$SCRIPT_DIR/setup-keycloak-https.sh" \
-      --domain   "$SSL_DOMAIN" \
-      --email    "$PLATFORM_ADMIN_EMAIL" \
-      --credebl-dir "$CREDEBL_DIR"
+    bash "$SCRIPT_DIR/setup-keycloak-https.sh" "${_ssl_args[@]}"
   fi
 fi
 
