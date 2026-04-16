@@ -272,10 +272,9 @@ recover_orphan_running_agent() {
   echo "  Found running agent container: $container"
 
   # Extract the host-side admin port (8xxx range — that's the Credo REST API port)
-  port=$(docker inspect \
-    --format '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{$p}} {{.HostPort}} {{"\n"}}{{end}}{{end}}' \
-    "$container" 2>/dev/null \
-    | awk -F'[/[:space:]]' '$1+0 >= 8000 && $1+0 < 9000 { print $NF; exit }')
+  # `docker port` output: "8006/tcp -> 0.0.0.0:8006" — $NF is always the host port
+  port=$(docker port "$container" 2>/dev/null \
+    | awk -F'[/: ]' '$1+0 >= 8000 && $1+0 < 9000 { print $NF; exit }')
   [ -z "$port" ] && { echo "  Could not determine admin port for $container"; return 1; }
 
   endpoint="http://${VPS_HOST}:${port}"
