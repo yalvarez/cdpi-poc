@@ -537,7 +537,13 @@ replacements = {
     "PLATFORM_WALLET_NAME":             e("PLATFORM_WALLET_NAME"),
     "PLATFORM_WALLET_PASSWORD":         e("PLATFORM_WALLET_PASSWORD"),
     "AGENT_API_KEY":                    e("AGENT_API_KEY"),
-    "WALLET_STORAGE_HOST":              e("VPS_HOST"),
+    # 172.17.0.1 = docker0 bridge gateway. The spawned Credo container runs on
+    # Docker's default bridge network (not credebl-net), so it cannot resolve
+    # the hostname 'postgres'. The public VPS IP is also unreliable because many
+    # VPS providers block self-connections on the public IP (loopback via NIC).
+    # 172.17.0.1 is always reachable from any default-bridge container and routes
+    # through to the host's published port 5432.
+    "WALLET_STORAGE_HOST":              "172.17.0.1",
     "WALLET_STORAGE_PASSWORD":          e("POSTGRES_PASSWORD"),
     "JWT_SECRET":                       e("JWT_SECRET"),
     "NEXTAUTH_SECRET":                  e("NEXTAUTH_SECRET"),
