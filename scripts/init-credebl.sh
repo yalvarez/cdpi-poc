@@ -248,6 +248,53 @@ clear_stale_platform_admin_agent() {
       DROP DATABASE IF EXISTS \"${PLATFORM_WALLET_NAME}\";" >/dev/null 2>&1 || true
 }
 
+# Handles the "container running but endpoint never written" race condition.
+# CREDEBL's agent-service can restart mid-provisioning, lose the NATS response from
+# agent-provisioning, and leave agentSpinUpStatus=1 with an empty agentEndPoint even
+# though the Credo container is healthy. This function detects that state, extracts the
+# admin port from the running container, tests it, and patches the DB directly.
+recover_orphan_running_agent() {
+  local container port endpoint
+
+  # Look for a running (not exited) Credo container whose name matches the UUID pattern
+  container=$(docker ps --format "{{.Names}}" 2>/dev/null \
+    | grep -E "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_Platform-admin$" \
+    | head -1 || true)
+  [ -z "$container" ] && return 1
+
+  echo "  Found running agent container: $container"
+
+  # Extract the host-side admin port (8xxx range — that's the Credo REST API port)
+  port=$(docker inspect \
+    --format '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{$p}} {{.HostPort}} {{"\n"}}{{end}}{{end}}' \
+    "$container" 2>/dev/null \
+    | awk -F'[/[:space:]]' '$1+0 >= 8000 && $1+0 < 9000 { print $NF; exit }')
+  [ -z "$port" ] && { echo "  Could not determine admin port for $container"; return 1; }
+
+  endpoint="http://${VPS_HOST}:${port}"
+  echo "  Testing agent endpoint: ${endpoint}/agent/token"
+
+  if ! curl -sf --max-time 10 -X POST \
+      -H "Authorization: $AGENT_API_KEY" "${endpoint}/agent/token" >/dev/null; then
+    echo "  Agent container is running but not responding on ${endpoint}"
+    return 1
+  fi
+
+  echo "  Agent is responding. Patching DB record (status=2, endpoint=${endpoint})..."
+  docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -v ON_ERROR_STOP=1 -c "
+      UPDATE org_agents oa
+      SET \"agentSpinUpStatus\" = 2,
+          \"agentEndPoint\"     = '${endpoint}'
+      FROM organisation o
+      WHERE oa.\"orgId\" = o.id
+        AND o.name = 'Platform-admin';" >/dev/null
+
+  echo "  Restarting agent-service so it picks up the updated endpoint..."
+  docker compose restart agent-service >/dev/null
+  sleep 20
+}
+
 ensure_platform_admin_shared_agent() {
   echo
   echo "Ensuring platform-admin shared agent is initialized..."
@@ -276,6 +323,15 @@ ensure_platform_admin_shared_agent() {
     sleep 50
     attempt=$((attempt + 1))
   done
+
+  # All retries exhausted. The Credo container may be running but the endpoint was never
+  # written to the DB (race condition: agent-service restarted mid-NATS response). Try
+  # to recover by detecting and patching the orphan container before giving up.
+  echo "  Retries exhausted. Attempting orphan-container recovery..."
+  if recover_orphan_running_agent && platform_admin_shared_agent_ready; then
+    echo "Platform-admin shared agent is ready (recovered from orphan container)."
+    return 0
+  fi
 
   echo "Error: platform-admin shared agent did not reach ready state." >&2
   echo "Inspect with: docker compose logs --tail=200 agent-service agent-provisioning" >&2
