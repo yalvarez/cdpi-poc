@@ -227,7 +227,7 @@ purge_stale_credo_containers() {
     found=1
   fi
 
-  [ "$found" -eq 0 ] && echo "  No stale Credo containers found."
+  [ "$found" -eq 0 ] && echo "  No stale Credo containers found." || true
 }
 
 clear_stale_platform_admin_agent() {
