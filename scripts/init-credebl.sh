@@ -438,10 +438,13 @@ JWT_TOKEN_SECRET="$(openssl rand -base64 32 | tr -d '\n')"
 # CRYPTO_PRIVATE_KEY must match platformAdminData.password encryption in master-table.json
 # Keep the PoC default so the seeded admin password decrypts correctly on first boot
 CRYPTO_PRIVATE_KEY="cdpi-poc-crypto-key-change-me"
-# UUID assigned to the platform admin user when created in Keycloak.
-# Required by newer CREDEBL seed versions. Our bootstrap handles the 409 (already exists)
-# case correctly, so both can coexist without conflict.
-ADMIN_KEYCLOAK_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+# Keycloak admin client credentials used by the seed to call the Keycloak Admin REST API.
+# ADMIN_KEYCLOAK_ID   = client_id  of the admin client (same as PLATFORM_ADMIN_KEYCLOAK_ID)
+# ADMIN_KEYCLOAK_SECRET = client_secret of that client (same as KEYCLOAK_CLIENT_SECRET)
+# Required by CREDEBL seed >= v1.x. Our bootstrap handles the 409 (user already exists)
+# gracefully, so seed + bootstrap can both run without conflict.
+ADMIN_KEYCLOAK_ID="adminClient"
+ADMIN_KEYCLOAK_SECRET="$KEYCLOAK_CLIENT_SECRET"
 
 # JWT signed with JWT_TOKEN_SECRET — required for W3C / did:web / did:key schema creation
 SCHEMA_FILE_SERVER_TOKEN="$(generate_hs256_jwt "$JWT_TOKEN_SECRET" "Credebl")"
@@ -495,7 +498,7 @@ export ENV_TEMPLATE ENV_FILE MASTER_TABLE \
   AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY \
   PLATFORM_SEED PLATFORM_WALLET_NAME PLATFORM_WALLET_PASSWORD \
   AGENT_API_KEY JWT_SECRET NEXTAUTH_SECRET JWT_TOKEN_SECRET \
-  SCHEMA_FILE_SERVER_TOKEN CRYPTO_PRIVATE_KEY ADMIN_KEYCLOAK_ID \
+  SCHEMA_FILE_SERVER_TOKEN CRYPTO_PRIVATE_KEY ADMIN_KEYCLOAK_ID ADMIN_KEYCLOAK_SECRET \
   PLATFORM_ADMIN_EMAIL VPS_HOST KEYCLOAK_HOST PROTOCOL \
   KEYCLOAK_DOMAIN_INTERNAL KEYCLOAK_ADMIN_URL_INTERNAL KEYCLOAK_PUBLIC_URL \
   STUDIO_URL API_ENDPOINT PLATFORM_WEB_URL SOCKET_HOST ENABLE_CORS_IP_LIST
@@ -542,6 +545,7 @@ replacements = {
     "SCHEMA_FILE_SERVER_TOKEN":         e("SCHEMA_FILE_SERVER_TOKEN"),
     "CRYPTO_PRIVATE_KEY":               e("CRYPTO_PRIVATE_KEY"),
     "ADMIN_KEYCLOAK_ID":                e("ADMIN_KEYCLOAK_ID"),
+    "ADMIN_KEYCLOAK_SECRET":            e("ADMIN_KEYCLOAK_SECRET"),
     "NEXTAUTH_COOKIE_DOMAIN":           "",
     "PLATFORM_ADMIN_EMAIL":             e("PLATFORM_ADMIN_EMAIL"),
     "API_ENDPOINT":                     e("API_ENDPOINT"),
