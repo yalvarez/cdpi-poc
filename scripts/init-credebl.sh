@@ -201,6 +201,7 @@ platform_admin_shared_agent_ready() {
 purge_stale_credo_containers() {
   local found=0 names
 
+  # Strategy 1: by image ancestor
   names=$(docker ps -a \
     --filter "ancestor=ghcr.io/credebl/credo-controller:latest" \
     --format "{{.Names}}" 2>/dev/null || true)
@@ -210,12 +211,18 @@ purge_stale_credo_containers() {
     found=1
   fi
 
-  # UUID name pattern: 8-4-4-4-12 hex digits followed by underscore
-  names=$(docker ps -a --format "{{.Names}}" 2>/dev/null \
-    | grep -E "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_" \
-    || true)
+  # Strategy 2: by name pattern — agent-provisioning names containers as
+  # "{org-uuid}_{ContainerName}" (e.g. "c1f8a28f-..._Platform-admin").
+  # Avoid grep-in-pipeline inside $() — with set -euo pipefail, grep's exit 1
+  # (no match) can escape the || true guard and kill the script. Use a while-read
+  # loop with bash regex instead, which has no pipeline exit-code hazard.
+  names=""
+  while IFS= read -r cname; do
+    [[ "$cname" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_ ]] \
+      && names="${names}${cname}"$'\n' || true
+  done < <(docker ps -a --format "{{.Names}}" 2>/dev/null || true)
   if [ -n "$names" ]; then
-    echo "$names" | xargs docker rm -f 2>/dev/null || true
+    printf '%s' "$names" | xargs docker rm -f 2>/dev/null || true
     echo "  Removed by name pattern: $(printf '%s' "$names" | tr '\n' ' ')"
     found=1
   fi
