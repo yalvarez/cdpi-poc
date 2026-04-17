@@ -13,6 +13,7 @@ if [ -f "$ENV_FILE" ]; then
   # Mapear variables estándar de CREDEBL a las variables del script de test
   [ -z "${ADMIN_EMAIL:-}" ] && ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-}"
   [ -z "${ADMIN_PASSWORD:-}" ] && ADMIN_PASSWORD="${PLATFORM_ADMIN_INITIAL_PASSWORD:-}"
+  [ -z "${AGENT_API_KEY:-}" ] && AGENT_API_KEY="${AGENT_API_KEY:-}"
   [ -z "${CRYPTO_PRIVATE_KEY:-}" ] && CRYPTO_PRIVATE_KEY="${CRYPTO_PRIVATE_KEY:-}"
 fi
 
