@@ -696,6 +696,31 @@ ensure_minio_setup
 
 ensure_platform_admin_shared_agent
 
+# Grant 'owner' org role to platform admin so org-scoped endpoints pass the
+# OrgRolesGuard. CREDEBL's guard on GET /orgs/:orgId and POST /orgs/:orgId/agents/wallet
+# requires [owner, admin, ...] — 'platform_admin' alone is not in those lists.
+# The platform_admin bypass in the guard only fires when there is NO orgId in
+# the request (admin-only endpoints). All org CRUD endpoints have :orgId in the URL.
+echo
+echo "Granting owner role to platform admin user..."
+docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+  psql -U credebl -d credebl -v ON_ERROR_STOP=1 -c "
+INSERT INTO user_org_roles (id, \"userId\", \"orgId\", \"orgRoleId\")
+SELECT gen_random_uuid(), uor.\"userId\", uor.\"orgId\", r.id
+FROM user_org_roles uor
+JOIN \"user\" u       ON u.id   = uor.\"userId\"
+JOIN org_roles src   ON src.id = uor.\"orgRoleId\" AND src.name = 'platform_admin'
+CROSS JOIN (SELECT id FROM org_roles WHERE name = 'owner') r
+WHERE u.email = '${PLATFORM_ADMIN_EMAIL}'
+  AND NOT EXISTS (
+    SELECT 1 FROM user_org_roles x
+    WHERE x.\"userId\"    = uor.\"userId\"
+      AND x.\"orgId\"     = uor.\"orgId\"
+      AND x.\"orgRoleId\" = r.id
+  );
+" >/dev/null
+echo "  Platform admin owner role ensured."
+
 # =============================================================================
 # SSL / HTTPS SETUP (only when requested)
 # =============================================================================

@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"https://raw.githubusercontent.com/credebl/platform/main/apps/user/src/user.service.ts\")",
+      "Bash(curl -s \"https://api.github.com/repos/credebl/platform/contents/libs\")",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(f['name']\\) for f in data]\")",
+      "Bash(curl -s \"https://api.github.com/repos/credebl/platform/contents/libs/client-registration/src\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/credebl/platform/main/libs/client-registration/src/client-registration.service.ts\")",
+      "Bash(curl -s \"https://api.github.com/repos/credebl/platform/contents/libs/client-registration/src/dtos\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/credebl/platform/main/libs/client-registration/src/dtos/userTokenPayloadDto.ts\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/credebl/platform/main/apps/organization/src/organization.service.ts\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/credebl/platform/main/libs/common/src/response-messages\")",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(f['name']\\) for f in data if 'name' in f]\")",
+      "Bash(curl -s \"https://api.github.com/repos/credebl/platform/contents/libs/common/src/response-messages\")",
+      "Bash(python3 -c \" import json,sys try: data=json.load\\(sys.stdin\\) if isinstance\\(data, list\\): [print\\(f['name']\\) for f in data if 'name' in f] else: print\\(data\\) \")"
+    ]
+  }
+}
