@@ -76,10 +76,17 @@ PLATFORM_WALLET_PASSWORD=<run: openssl rand -hex 16>
 AGENT_API_KEY=<run: openssl rand -hex 32>
 AGENT_PROTOCOL=http
 AFJ_VERSION=ghcr.io/credebl/credo-controller:latest
-WALLET_STORAGE_HOST=YOUR_VPS_IP
+# IMPORTANT: must be 172.17.0.1 (docker0 bridge gateway), NOT the VPS IP or 'postgres'.
+# The spawned Credo container runs on Docker's default bridge (not credebl-net) and
+# cannot resolve 'postgres' by name. The VPS public IP is blocked by loopback rules
+# on most VPS providers. 172.17.0.1 always routes to the host's published port 5432.
+WALLET_STORAGE_HOST=172.17.0.1
 WALLET_STORAGE_PORT=5432
 WALLET_STORAGE_USER=credebl
 WALLET_STORAGE_PASSWORD=<copy POSTGRES_PASSWORD>
+# Required by CREDEBL seed >= v1.x — use same value as KEYCLOAK_CLIENT_SECRET
+ADMIN_KEYCLOAK_ID=adminClient
+ADMIN_KEYCLOAK_SECRET=<copy KEYCLOAK_CLIENT_SECRET>
 JWT_SECRET=<run: openssl rand -hex 32>
 SCHEMA_FILE_SERVER_URL=http://schema-file-server:4000/schemas/
 SCHEMA_FILE_SERVER_TOKEN=<JWT signed with JWT_TOKEN_SECRET>

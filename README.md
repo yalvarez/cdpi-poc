@@ -122,18 +122,20 @@ The script asks **4 questions** (5 if you enable HTTPS):
 
 All passwords and secrets are generated automatically. A **full credentials report** is printed before Docker starts — save it securely.
 
-The script then pulls images, starts the stack, waits for MinIO and the platform-admin shared agent to be ready, optionally configures the SSL certificate, and runs the health check automatically.
+The script pulls images, builds Studio (Next.js), starts the full stack, waits for MinIO and the platform-admin shared agent to initialize, optionally configures SSL, and runs the health check automatically. On subsequent runs it detects the existing Studio image and offers to skip the build — saves 5-8 minutes on re-deploy.
 
 ### 5. Access the platform
 
 - Studio (web UI): `http://<YOUR_IP>:3000`
 - Credentials: from the report printed in step 4
 
-### 6. (Optional) End-to-end test
+### 6. Verify the deployment
 
 ```bash
-bash scripts/credebl-api-e2e.sh <YOUR_IP> <your_email>
+bash scripts/health-check.sh
 ```
+
+All 35 checks should pass. Access points are printed at the end.
 
 ---
 
@@ -174,17 +176,9 @@ bash ../scripts/health-check-inji.sh
 
 ## Reset CREDEBL installation (full cleanup)
 
-If you need to wipe the server for a clean install, run:
+Re-running `init-credebl.sh` handles this — it asks whether to do a full `docker compose down -v --remove-orphans` before starting. Answer Y for a clean reset.
 
-```bash
-bash scripts/reset-credebl-poc.sh
-```
-
-This script:
-- Removes all containers, volumes, and config/data files related to CREDEBL
-- Cleans logs and leaves the environment ready for a new installation
-
-**Warning:** Does not delete Docker resources outside CREDEBL/cdpi-poc
+The Studio image (`credebl-studio`) is preserved across resets since `docker compose down -v` does not remove built images. Re-run and answer N to the "Skip rebuild?" prompt only if the VPS IP or secrets changed.
 
 ---
 
@@ -209,7 +203,7 @@ This script:
 | Studio (web UI) | `http://VPS_IP:3000` |
 | API Gateway | `http://VPS_IP:5000` |
 | Keycloak | `http://VPS_IP:8080` |
-| MinIO console | `http://VPS_IP:9001` |
+| MinIO console | `http://VPS_IP:9011` |
 | Email (Mailpit) | `http://VPS_IP:8025` |
 
 ### INJI
@@ -236,6 +230,8 @@ Run `generate-inji-certs.sh` before first deploy to create the required keystore
 
 - [x] CREDEBL — Docker Compose, env template, Keycloak, MinIO, Mailpit
 - [x] CREDEBL — Single-path initializer (`init-credebl.sh`) — 4 prompts, full deploy
+- [x] CREDEBL — Validated end-to-end on real VPS (April 2026) — all 35 health checks pass
+- [x] CREDEBL — Studio image skip-build optimization (reuses existing image on re-deploy)
 - [x] CREDEBL — OIDC swap procedure (Day 5)
 - [x] CREDEBL — Deployment manual + test flows
 - [x] CREDEBL — Verification SDK (Node.js + Python)
@@ -247,3 +243,4 @@ Run `generate-inji-certs.sh` before first deploy to create the required keystore
 - [x] VPS setup script + health check scripts (CREDEBL + INJI)
 - [x] Keystore generation script
 - [x] `credebl-master-table.json` aligned with the upstream CREDEBL seed schema
+- [ ] INJI — Validated end-to-end on real VPS
