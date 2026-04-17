@@ -524,6 +524,11 @@ replacements = {
     "KEYCLOAK_ADMIN_URL":               e("KEYCLOAK_ADMIN_URL_INTERNAL"),
     "KEYCLOAK_CLIENT_SECRET":           e("KEYCLOAK_CLIENT_SECRET"),
     "KEYCLOAK_MANAGEMENT_CLIENT_SECRET": e("KEYCLOAK_CLIENT_SECRET"),
+    # MUST be credebl-client (NOT adminClient). adminClient tokens lack
+    # resource_access.credebl-client.roles, which causes all org-level endpoints
+    # (GET /orgs/{id}, POST /orgs/{id}/agents/wallet, etc.) to return 403
+    # "User does not have access" even when the user has the correct DB role.
+    "PLATFORM_ADMIN_KEYCLOAK_ID":       "credebl-client",
     "PLATFORM_ADMIN_KEYCLOAK_SECRET":   e("KEYCLOAK_CLIENT_SECRET"),
     "KEYCLOAK_PUBLIC_URL":              e("KEYCLOAK_PUBLIC_URL"),
     "PLATFORM_ADMIN_INITIAL_PASSWORD":  e("PLATFORM_ADMIN_INITIAL_PASSWORD"),
