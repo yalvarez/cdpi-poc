@@ -121,7 +121,7 @@ if [ -z "$ORG_ID" ]; then
 fi
 
 echo "Organization ID: $ORG_ID"
-
+sleep 10
 echo "[4/8] Spin up shared wallet"
 WALLET_PAYLOAD="$(jq -n --arg label "ApiE2EWallet$REQUEST_ID" '{label:$label, clientSocketId:""}')"
 WALLET_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/agents/wallet" "${auth_header[@]}" -d "$WALLET_PAYLOAD")"
