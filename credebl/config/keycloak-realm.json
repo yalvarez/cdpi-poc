@@ -30,6 +30,7 @@
       ],
       "webOrigins": ["*"],
       "defaultClientScopes": [
+        "openid",
         "web-origins",
         "profile",
         "roles",
@@ -55,6 +56,7 @@
       "publicClient": false,
       "protocol": "openid-connect",
       "defaultClientScopes": [
+        "openid",
         "profile",
         "email",
         "roles"
