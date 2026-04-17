@@ -639,15 +639,18 @@ cd "$CREDEBL_DIR"
 mkdir -p .agent-runtime/agent-config .agent-runtime/token .agent-runtime/endpoints
 
 # `docker compose down -v` does NOT remove built images — only containers and
-# volumes. So the Studio image (credebl-studio:latest) survives a full reset and
-# can be reused on the next run, saving several minutes of Next.js build time.
-# Build args like NEXTAUTH_SECRET and API_ENDPOINT are baked in at build time —
-# if the VPS IP or secrets changed, answer N below to force a rebuild.
-STUDIO_IMAGE="credebl-studio:latest"
+# volumes. So the Studio image survives a full reset and can be reused, saving
+# several minutes of Next.js build time. Build args (NEXTAUTH_SECRET, API_ENDPOINT,
+# etc.) are baked in at build time — if the VPS IP or secrets changed, force a
+# rebuild by answering N to the question below.
+# docker compose names a build-only service image as <project>-<service>.
+# When run from the credebl/ directory the project name is "credebl", so the
+# Studio image is always "credebl-studio". Check for that specific image name.
+STUDIO_IMAGE="credebl-studio"
 SKIP_STUDIO_BUILD=false
 if docker image inspect "$STUDIO_IMAGE" >/dev/null 2>&1; then
   echo
-  if ask_yes_no "Studio image (credebl-studio:latest) already exists. Skip rebuild?" "Y"; then
+  if ask_yes_no "Studio image already exists. Skip rebuild? (answer N if VPS IP or secrets changed)" "Y"; then
     SKIP_STUDIO_BUILD=true
     echo "  Will reuse existing Studio image."
   else
@@ -674,9 +677,14 @@ docker compose pull
 echo
 echo "Starting the stack..."
 if [ "$SKIP_STUDIO_BUILD" = "true" ]; then
+  # Image already exists — skip the Next.js build entirely.
   docker compose up -d --no-build
 else
-  docker compose up -d --build
+  # Build Studio first (docker compose pull skips build-only services, so the
+  # image doesn't exist yet). Then bring up all services without rebuilding.
+  echo "Building Studio image (this may take several minutes)..."
+  docker compose build studio
+  docker compose up -d --no-build
 fi
 
 ensure_minio_setup
