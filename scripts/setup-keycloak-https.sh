@@ -378,15 +378,59 @@ server {
         default_type "text/plain";
     }
 
-    location / {
-        proxy_pass http://127.0.0.1:${VPS_PORT};
+    # next-auth internal routes → Studio (port 3000)
+    location ^~ /api/auth/ {
+        proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Port 80;
+        proxy_buffering off;
+    }
+
+    # API gateway Swagger UI — exact match only (not /api/encrypt or other Studio routes)
+    location ~ ^/(api|api-json)$ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_buffering off;
+    }
+
+    # API gateway routes that already include /v1/ prefix
+    location ~ ^/v1/ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_buffering off;
+    }
+
+    # API gateway routes without /v1/ prefix — rewrite adds it
+    location ~ ^/(auth|users|orgs|agents|connections|credentials|verification|schemas|ledger|ecosystems|platform-settings|bulk-verification)(/|\$) {
+        rewrite ^/(.*)\$ /v1/\$1 break;
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_buffering off;
+    }
+
+    # Studio catch-all (Next.js)
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_buffering off;
     }
 }
@@ -415,9 +459,7 @@ server {
         default_type "text/plain";
     }
 
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
+    location / { return 301 https://\$host\$request_uri; }
 }
 
 server {
@@ -429,18 +471,64 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/${VPS_DOMAIN}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
     client_max_body_size 25m;
 
-    location / {
-        proxy_pass http://127.0.0.1:${VPS_PORT};
+    # next-auth internal routes → Studio (port 3000)
+    # Must be ^~ so it wins over the /api regex below
+    location ^~ /api/auth/ {
+        proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Port 443;
+        proxy_buffering off;
+    }
+
+    # API gateway Swagger UI — exact match only (/api/encrypt and other
+    # Studio-internal /api/* routes must fall through to the catch-all below)
+    location ~ ^/(api|api-json)\$ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+    }
+
+    # API gateway routes that already include the /v1/ prefix
+    location ~ ^/v1/ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+    }
+
+    # API gateway routes without /v1/ prefix — rewrite adds it before proxying.
+    # Studio calls these without the prefix; Nginx adds it transparently.
+    location ~ ^/(auth|users|orgs|agents|connections|credentials|verification|schemas|ledger|ecosystems|platform-settings|bulk-verification)(/|\$) {
+        rewrite ^/(.*)\$ /v1/\$1 break;
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+    }
+
+    # Studio catch-all (Next.js — handles all UI routes and /api/* server routes)
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_buffering off;
     }
 }
@@ -515,6 +603,17 @@ verify_proxy_setup() {
   esac
 }
 
+set_env_var() {
+  # set_env_var <file> <KEY> <value>
+  # Replaces KEY=... in file, or appends if missing.
+  local file="$1" key="$2" value="$3"
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
 update_credebl_env() {
   local env_file="$CREDEBL_DIR/.env"
   if [[ ! -f "$env_file" ]]; then
@@ -522,23 +621,64 @@ update_credebl_env() {
     return
   fi
 
+  # KEYCLOAK_PUBLIC_URL — public URL Keycloak uses in issuer claims (HTTPS)
   log "Updating KEYCLOAK_PUBLIC_URL in $env_file"
-  if grep -q '^KEYCLOAK_PUBLIC_URL=' "$env_file"; then
-    sed -i "s|^KEYCLOAK_PUBLIC_URL=.*|KEYCLOAK_PUBLIC_URL=https://$DOMAIN|" "$env_file"
-  else
-    printf '\nKEYCLOAK_PUBLIC_URL=https://%s\n' "$DOMAIN" >> "$env_file"
-  fi
+  set_env_var "$env_file" "KEYCLOAK_PUBLIC_URL" "https://$DOMAIN"
 
-  # KEYCLOAK_DOMAIN must match the issuer claim in Keycloak-issued JWTs.
-  # After SSL setup Keycloak emits iss: https://<domain>/realms/... — CREDEBL
-  # services validate the iss claim against KEYCLOAK_DOMAIN, so they must agree.
-  # Services reach this URL via the Docker bridge gateway (extra_hosts in compose).
+  # KEYCLOAK_DOMAIN — must match the iss claim in Keycloak JWTs so CREDEBL
+  # services pass JWT validation. After SSL, Keycloak emits
+  # iss: https://<domain>/realms/... — this value must end with a trailing slash.
   log "Updating KEYCLOAK_DOMAIN to match the HTTPS issuer in $env_file"
-  if grep -q '^KEYCLOAK_DOMAIN=' "$env_file"; then
-    sed -i "s|^KEYCLOAK_DOMAIN=.*|KEYCLOAK_DOMAIN=https://$DOMAIN/|" "$env_file"
-  else
-    printf '\nKEYCLOAK_DOMAIN=https://%s/\n' "$DOMAIN" >> "$env_file"
+  set_env_var "$env_file" "KEYCLOAK_DOMAIN" "https://$DOMAIN/"
+
+  # When a VPS_DOMAIN is given the Studio and API gateway are both served from
+  # that domain via Nginx path routing. Update all public-facing URLs so Studio
+  # build args and email links are correct.
+  if [[ -n "$VPS_DOMAIN" ]]; then
+    log "Updating Studio / API gateway public URLs for HTTPS VPS domain in $env_file"
+
+    # API_GATEWAY_PROTOCOL=https makes Studio bake NEXT_PUBLIC_BASE_URL as
+    # https://... at build time. Without this, Node.js fetch follows the 301
+    # redirect from Nginx and converts POST → GET, breaking login.
+    set_env_var "$env_file" "API_GATEWAY_PROTOCOL" "https"
+    set_env_var "$env_file" "APP_PROTOCOL"         "https"
+
+    # API_ENDPOINT is host only (no protocol, no port) — Studio prepends the
+    # protocol from API_GATEWAY_PROTOCOL to form NEXT_PUBLIC_BASE_URL.
+    # With Nginx on 443 there is no port in the URL.
+    set_env_var "$env_file" "API_ENDPOINT"  "$VPS_DOMAIN"
+
+    # Studio is now on the same domain as the API (no separate port)
+    set_env_var "$env_file" "STUDIO_URL"        "https://$VPS_DOMAIN"
+    set_env_var "$env_file" "PLATFORM_WEB_URL"  "https://$VPS_DOMAIN"
+    set_env_var "$env_file" "FRONT_END_URL"     "https://$VPS_DOMAIN"
+    set_env_var "$env_file" "SOCKET_HOST"       "https://$VPS_DOMAIN"
+
+    # Allow the browser to call the API from the Studio origin
+    set_env_var "$env_file" "ENABLE_CORS_IP_LIST" "https://$VPS_DOMAIN,http://localhost:3000,http://127.0.0.1:3000"
   fi
+}
+
+rebuild_studio() {
+  # Studio bakes NEXT_PUBLIC_BASE_URL (and other NEXT_PUBLIC_* vars) at build time.
+  # After changing API_GATEWAY_PROTOCOL or API_ENDPOINT, the image must be rebuilt
+  # or the Studio will still call the old HTTP URL and login will break.
+  [[ -z "$VPS_DOMAIN" ]] && return
+  if [[ ! -f "$CREDEBL_DIR/docker-compose.yml" ]]; then
+    warn "No docker-compose.yml found; skipping Studio rebuild."
+    return
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    warn "Docker not available; skipping Studio rebuild. Run 'docker compose build studio && docker compose up -d studio' manually."
+    return
+  fi
+  log "Rebuilding Studio with updated HTTPS env vars (this takes 5-8 minutes)..."
+  (
+    cd "$CREDEBL_DIR"
+    docker compose build studio
+    docker compose up -d studio
+  )
+  log "Studio rebuilt and restarted."
 }
 
 restart_credebl_services() {
@@ -634,28 +774,35 @@ wait_for_keycloak() {
 }
 
 print_summary() {
+  local kc_url vps_url
+  if cert_paths_exist && [[ "$SKIP_CERTBOT" -eq 0 ]]; then
+    kc_url="https://$DOMAIN"
+  else
+    kc_url="http://$DOMAIN"
+  fi
+
   echo ""
   echo "============================================================"
   echo " HTTPS setup complete"
   echo "============================================================"
-  if cert_paths_exist && [[ "$SKIP_CERTBOT" -eq 0 ]]; then
-    echo " Keycloak: https://$DOMAIN"
-  else
-    echo " Keycloak: http://$DOMAIN"
-  fi
+  echo " Keycloak:    $kc_url"
   if [[ -n "$VPS_DOMAIN" ]]; then
     if cert_is_valid "$VPS_DOMAIN" || [[ -f "/etc/letsencrypt/live/${VPS_DOMAIN}/fullchain.pem" ]]; then
-      echo " VPS API:  https://$VPS_DOMAIN"
+      vps_url="https://$VPS_DOMAIN"
     else
-      echo " VPS API:  http://$VPS_DOMAIN (no certificate yet)"
+      vps_url="http://$VPS_DOMAIN (no certificate yet)"
     fi
+    echo " Studio:      $vps_url"
+    echo " API gateway: $vps_url/v1/"
+    echo " API Swagger: $vps_url/api"
   fi
   echo ""
   echo " Next steps:"
-  echo "   1. Open https://$DOMAIN/admin/"
-  echo "   2. Verify Keycloak login loads without the HTTPS-required error"
-  echo "   3. If needed, restart the full CREDEBL stack:"
-  echo "      cd $CREDEBL_DIR && docker compose up -d"
+  echo "   1. Open $kc_url/admin/ — verify Keycloak loads without HTTPS-required error"
+  if [[ -n "$VPS_DOMAIN" ]]; then
+    echo "   2. Open $vps_url — log in to Studio"
+    echo "   3. If login fails, ensure Studio was rebuilt (check 'docker compose ps studio')"
+  fi
   echo ""
 }
 
@@ -685,6 +832,7 @@ main() {
   wait_for_keycloak
   verify_proxy_setup
   restart_credebl_services
+  rebuild_studio
   print_summary
 }
 
