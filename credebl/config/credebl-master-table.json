@@ -7,7 +7,9 @@
     "emailFrom": "noreply@cdpi-poc.local",
     "apiEndpoint": "http://YOUR_VPS_IP:5000",
     "tailsFileServer": "https://tails.vonx.io",
-    "agentApiKey": "0ce94fd516b02cd50a23d270f94613d382810ba67e57cb66acbe7f32f9a0a175"
+    "agentApiKey": "0ce94fd516b02cd50a23d270f94613d382810ba67e57cb66acbe7f32f9a0a175",
+    "apiKey": "0ce94fd516b02cd50a23d270f94613d382810ba67e57cb66acbe7f32f9a0a175",
+    "platformApiKey": "0ce94fd516b02cd50a23d270f94613d382810ba67e57cb66acbe7f32f9a0a175"
   },
   "platformAdminData": {
     "firstName": "Platform",
