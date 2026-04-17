@@ -344,6 +344,7 @@ services:
 
   # ── Studio (web UI built from local source) ────────────────────────────────
   studio:
+    image: credebl-studio:latest
     build:
       context: ./studio
       dockerfile: Dockerfile

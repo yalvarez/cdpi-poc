@@ -638,6 +638,23 @@ echo
 cd "$CREDEBL_DIR"
 mkdir -p .agent-runtime/agent-config .agent-runtime/token .agent-runtime/endpoints
 
+# `docker compose down -v` does NOT remove built images — only containers and
+# volumes. So the Studio image (credebl-studio:latest) survives a full reset and
+# can be reused on the next run, saving several minutes of Next.js build time.
+# Build args like NEXTAUTH_SECRET and API_ENDPOINT are baked in at build time —
+# if the VPS IP or secrets changed, answer N below to force a rebuild.
+STUDIO_IMAGE="credebl-studio:latest"
+SKIP_STUDIO_BUILD=false
+if docker image inspect "$STUDIO_IMAGE" >/dev/null 2>&1; then
+  echo
+  if ask_yes_no "Studio image (credebl-studio:latest) already exists. Skip rebuild?" "Y"; then
+    SKIP_STUDIO_BUILD=true
+    echo "  Will reuse existing Studio image."
+  else
+    echo "  Will rebuild Studio image."
+  fi
+fi
+
 if ask_yes_no "Clean reset first? (docker compose down -v --remove-orphans)" "Y"; then
   docker compose down -v --remove-orphans
 fi
@@ -656,7 +673,11 @@ docker compose pull
 
 echo
 echo "Starting the stack..."
-docker compose up -d --build
+if [ "$SKIP_STUDIO_BUILD" = "true" ]; then
+  docker compose up -d --no-build
+else
+  docker compose up -d --build
+fi
 
 ensure_minio_setup
 
