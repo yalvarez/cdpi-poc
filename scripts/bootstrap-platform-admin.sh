@@ -120,6 +120,20 @@ psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -v ON_ERROR_STOP=1 \
   -c "UPDATE \"user\" SET \"keycloakUserId\"='${KC_USER_ID}' WHERE email='${PLATFORM_ADMIN_EMAIL}';"
 
+echo "==> Ensuring 'owner' role for platform admin in 'Platform-admin' organization"
+psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -v ON_ERROR_STOP=1 \
+  -c "INSERT INTO user_org_roles (id, \"userId\", \"orgId\", \"orgRoleId\")
+      SELECT gen_random_uuid(), u.id, o.id, r.id
+      FROM \"user\" u, organisation o, org_roles r
+      WHERE u.email='${PLATFORM_ADMIN_EMAIL}'
+        AND o.name='Platform-admin'
+        AND r.name='owner'
+        AND NOT EXISTS (
+          SELECT 1 FROM user_org_roles
+          WHERE \"userId\"=u.id AND \"orgId\"=o.id AND \"orgRoleId\"=r.id
+        );"
+
 echo "==> Ensuring DEFAULT_USER role is assigned in user_role_mapping"
 psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -v ON_ERROR_STOP=1 \

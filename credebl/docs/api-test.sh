@@ -1,8 +1,3 @@
-#!/bin/bash
-# Script para probar la API de CREDEBL sin Studio
-
-
-
 #!/usr/bin/env bash
 set -euo pipefail
 
