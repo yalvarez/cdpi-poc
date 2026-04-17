@@ -157,7 +157,7 @@ export const authOptions: MyAuthOptions = {
 
             return {
               id: user.data.session_state || user.data.email,
-              sessionId: user.data.sessionId,
+              sessionId: user.data.sessionId || user.data.session_state,
             }
           }
 
