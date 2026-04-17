@@ -11,7 +11,9 @@ set -euo pipefail
 # Cargar variables desde credebl/.env si existe
 ENV_FILE="credebl/.env"
 if [ -f "$ENV_FILE" ]; then
-  export $(grep -v '^#' "$ENV_FILE" | grep -E '^[A-Z0-9_]+=' | xargs)
+  set -a
+  source <(grep -E '^[A-Z0-9_]+=' "$ENV_FILE")
+  set +a
 fi
 
 # Función para pedir variable si no existe
