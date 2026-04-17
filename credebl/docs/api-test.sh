@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Script E2E CREDEBL: lee .env, autocompleta variables y ejecuta el flujo robusto E2E
 
-# Cargar variables desde credebl/.env si existe
+# Cargar variables desde credebl/.env si existe (solo clave=valor válidas)
 ENV_FILE="credebl/.env"
 if [ -f "$ENV_FILE" ]; then
   set -a
