@@ -145,6 +145,116 @@ wait_for_container_state() {
   return 1
 }
 
+# =============================================================================
+# CONTAINER PATCHES
+# =============================================================================
+# CREDEBL container patches required for self-hosted MinIO and internal schemas.
+# Applied after every `docker compose up` because patches live inside container
+# filesystems and are lost when containers are recreated.
+# Each patch is idempotent — safe to run on already-patched containers.
+
+patch_utility_s3() {
+  # AWS SDK v2 does NOT read AWS_ENDPOINT from environment automatically.
+  # Without this patch, S3 calls from the utility service go to real AWS
+  # and fail with "The AWS Access Key Id you provided does not exist".
+  # We add endpoint + s3ForcePathStyle:true to all three S3 client constructors.
+  docker exec credebl-utility node - <<'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/utility/main.js';
+let content = fs.readFileSync(path, 'utf8');
+if (content.includes('s3ForcePathStyle')) { process.stdout.write('  already patched\n'); process.exit(0); }
+// The three constructors end with `region: process.env.AWS_*_REGION\n        });`
+// Add endpoint + s3ForcePathStyle before the closing }).
+content = content
+  .replace(
+    'region: process.env.AWS_REGION\n        })',
+    'region: process.env.AWS_REGION,\n            endpoint: process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        })'
+  )
+  .replace(
+    'region: process.env.AWS_PUBLIC_REGION\n        })',
+    'region: process.env.AWS_PUBLIC_REGION,\n            endpoint: process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        })'
+  )
+  .replace(
+    'region: process.env.AWS_S3_STOREOBJECT_REGION\n        })',
+    'region: process.env.AWS_S3_STOREOBJECT_REGION,\n            endpoint: process.env.AWS_S3_STOREOBJECT_ENDPOINT || process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        })'
+  );
+if (!content.includes('s3ForcePathStyle')) { process.stderr.write('  ERROR: patch pattern not found — CREDEBL image may have changed\n'); process.exit(1); }
+fs.writeFileSync(path, content);
+process.stdout.write('  patched\n');
+JSEOF
+}
+
+patch_api_gateway_context_validator() {
+  # IsCredentialJsonLdContext validator calls isURL(v) with default require_tld:true.
+  # This rejects Docker-internal hostnames like schema-file-server (no TLD).
+  # Adding require_tld:false allows internal hostnames in @context arrays.
+  docker exec credebl-api-gateway node - <<'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/api-gateway/main.js';
+let content = fs.readFileSync(path, 'utf8');
+const target = '(0, class_validator_1.isURL)(v)';
+const replacement = '(0, class_validator_1.isURL)(v, { require_tld: false })';
+// Only patch the occurrence inside the IsCredentialJsonLdContext validator
+const validatorIdx = content.indexOf('IsCredentialJsonLdContext');
+if (validatorIdx < 0) { process.stderr.write('  ERROR: IsCredentialJsonLdContext not found\n'); process.exit(1); }
+const after = content.indexOf(target, validatorIdx);
+if (after < 0 || after > validatorIdx + 2000) { process.stdout.write('  already patched or pattern changed\n'); process.exit(0); }
+content = content.substring(0, after) + replacement + content.substring(after + target.length);
+fs.writeFileSync(path, content);
+process.stdout.write('  patched\n');
+JSEOF
+}
+
+patch_credo_credential_events() {
+  # The Credo root agent (multi-tenancy) does not expose agent.modules.credentials.
+  # Without this patch, getFormatData() throws "Cannot read properties of undefined"
+  # which crashes the event handler and causes ECONNREFUSED on retries.
+  local credo_container
+  credo_container="$(docker ps --format '{{.Names}}' | grep -v '^credebl-' | grep -v '^[0-9a-f]\{12\}_credebl' | head -1)"
+  if [ -z "$credo_container" ]; then
+    echo "  No Credo controller container found — skipping."
+    return 0
+  fi
+  docker exec "$credo_container" node - <<'JSEOF'
+const fs = require('fs');
+const path = '/app/build/events/CredentialEvents.js';
+let content = fs.readFileSync(path, 'utf8');
+if (content.includes('getFormatData unavailable')) { process.stdout.write('  already patched\n'); process.exit(0); }
+// Match the bare getFormatData call at any indentation level (the two lines we need to wrap)
+const pattern = /^(\s+)const data = await agent\.modules\.credentials\.getFormatData\(record\.id\);\n\s+body\.credentialData = data;/m;
+const m = content.match(pattern);
+if (!m) { process.stderr.write('  ERROR: patch target not found in CredentialEvents.js\n'); process.exit(1); }
+const indent = m[1]; // preserve original indentation
+const replacement = `${indent}try {\n${indent}    if (agent.modules && agent.modules.credentials) {\n${indent}        const data = await agent.modules.credentials.getFormatData(record.id);\n${indent}        body.credentialData = data;\n${indent}    }\n${indent}} catch (e) {\n${indent}    // getFormatData unavailable in this agent context (e.g. multi-tenancy root agent)\n${indent}}`;
+content = content.replace(pattern, replacement);
+fs.writeFileSync(path, content);
+process.stdout.write('  patched\n');
+JSEOF
+  docker restart "$credo_container" >/dev/null
+}
+
+apply_container_patches() {
+  echo
+  echo "Applying CREDEBL container patches..."
+  echo -n "  Utility service S3 → MinIO endpoint: "
+  patch_utility_s3
+  docker restart credebl-utility >/dev/null
+
+  echo -n "  API gateway @context validator (require_tld): "
+  patch_api_gateway_context_validator
+  docker restart credebl-api-gateway >/dev/null
+
+  echo "  Waiting for restarted containers to be ready..."
+  local deadline=$(( $(date +%s) + 60 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    local gw_health
+    gw_health="$(docker inspect credebl-api-gateway --format '{{.State.Health.Status}}' 2>/dev/null || true)"
+    [ "$gw_health" = "healthy" ] && break
+    sleep 3
+  done
+  echo "  Patches applied."
+}
+
 ensure_minio_setup() {
   echo
   echo "Ensuring MinIO buckets and access keys are initialized..."
@@ -479,6 +589,15 @@ API_ENDPOINT="${VPS_HOST}:5000"           # bare host:port — no protocol prefi
 PLATFORM_WEB_URL="${PROTOCOL}://${VPS_HOST}:5000"
 SOCKET_HOST="${PROTOCOL}://${VPS_HOST}:5000"
 ENABLE_CORS_IP_LIST="${STUDIO_URL},http://localhost:3000,http://127.0.0.1:3000"
+# DEEPLINK_DOMAIN: base URL embedded in OOB email invitations so wallet apps can
+# open the deep link. For HTTPS deployments, setup-keycloak-https.sh updates this.
+if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_VPS_DOMAIN" ]; then
+  DEEPLINK_DOMAIN="https://${SSL_VPS_DOMAIN}"
+elif [ "$ENABLE_SSL" = "true" ]; then
+  DEEPLINK_DOMAIN="https://${SSL_KEYCLOAK_DOMAIN}"
+else
+  DEEPLINK_DOMAIN="${PLATFORM_WEB_URL}"
+fi
 
 # =============================================================================
 # WRITE .env FROM TEMPLATE
@@ -500,7 +619,7 @@ export ENV_TEMPLATE ENV_FILE MASTER_TABLE \
   SCHEMA_FILE_SERVER_TOKEN CRYPTO_PRIVATE_KEY ADMIN_KEYCLOAK_ID ADMIN_KEYCLOAK_SECRET \
   PLATFORM_ADMIN_EMAIL VPS_HOST KEYCLOAK_HOST PROTOCOL \
   KEYCLOAK_DOMAIN_INTERNAL KEYCLOAK_ADMIN_URL_INTERNAL KEYCLOAK_PUBLIC_URL \
-  STUDIO_URL API_ENDPOINT PLATFORM_WEB_URL SOCKET_HOST ENABLE_CORS_IP_LIST
+  STUDIO_URL API_ENDPOINT PLATFORM_WEB_URL SOCKET_HOST ENABLE_CORS_IP_LIST DEEPLINK_DOMAIN
 
 python3 <<'PY'
 import json, os, re
@@ -566,6 +685,7 @@ replacements = {
     "SOCKET_HOST":                      e("SOCKET_HOST"),
     "ENABLE_CORS_IP_LIST":              e("ENABLE_CORS_IP_LIST"),
     "APP_PROTOCOL":                     e("PROTOCOL"),
+    "DEEPLINK_DOMAIN":                  e("DEEPLINK_DOMAIN"),
 }
 
 for key, value in replacements.items():
@@ -694,7 +814,13 @@ fi
 
 ensure_minio_setup
 
+apply_container_patches
+
 ensure_platform_admin_shared_agent
+
+# Re-apply the Credo patch now that the platform admin agent container is running.
+echo -n "  Patching Credo CredentialEvents (post-agent-spawn): "
+patch_credo_credential_events
 
 # Grant 'owner' org role to platform admin so org-scoped endpoints pass the
 # OrgRolesGuard. CREDEBL's guard on GET /orgs/:orgId and POST /orgs/:orgId/agents/wallet
