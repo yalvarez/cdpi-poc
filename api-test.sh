@@ -13,6 +13,8 @@ if [ -f "$ENV_FILE" ]; then
   # Mapear variables estándar de CREDEBL a las variables del script de test
   [ -z "${ADMIN_EMAIL:-}" ] && ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-}"
   [ -z "${ADMIN_PASSWORD:-}" ] && ADMIN_PASSWORD="${PLATFORM_ADMIN_INITIAL_PASSWORD:-}"
+  [ -z "${AGENT_API_KEY:-}" ] && AGENT_API_KEY="${AGENT_API_KEY:-}"
+  [ -z "${CRYPTO_PRIVATE_KEY:-}" ] && CRYPTO_PRIVATE_KEY="${CRYPTO_PRIVATE_KEY:-}"
 fi
 
 # Función para pedir variable si no existe
@@ -79,7 +81,7 @@ encrypt_admin_password() {
   local plain="$1"
   local quoted
   quoted="$(jq -Rn --arg p "$plain" '$p')"
-  printf '%s' "$quoted" | openssl enc -aes-256-cbc -salt -base64 -A -md md5 -pass "pass:$CRYPTO_PRIVATE_KEY"
+  printf '%s' "$quoted" | openssl enc -aes-256-cbc -salt -base64 -A -md md5 -pass "pass:$CRYPTO_PRIVATE_KEY" 2>/dev/null
 }
 
 echo "[1/8] Encrypt admin password locally"
@@ -121,7 +123,6 @@ if [ -z "$ORG_ID" ]; then
 fi
 
 echo "Organization ID: $ORG_ID"
-sleep 10
 echo "[4/8] Spin up shared wallet"
 WALLET_PAYLOAD="$(jq -n --arg label "ApiE2EWallet$REQUEST_ID" '{label:$label, clientSocketId:""}')"
 WALLET_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/agents/wallet" "${auth_header[@]}" -d "$WALLET_PAYLOAD")"
