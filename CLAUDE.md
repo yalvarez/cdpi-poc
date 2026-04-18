@@ -53,9 +53,11 @@ cdpi-poc/
 ├── .gitignore
 ├── scripts/
 │   ├── setup-vps.sh               ← Ubuntu 22/24 VPS setup (Docker, firewall, swap)
+│   ├── init-credebl.sh            ← CREDEBL single-path initializer (4 questions → full deploy)
 │   ├── health-check.sh            ← CREDEBL stack verification
 │   ├── health-check-inji.sh       ← INJI stack verification
 │   └── generate-inji-certs.sh     ← PKCS12 keystore for INJI (run once)
+├── api-test.sh                    ← Full E2E CREDEBL test (8 steps: signin → issuance → list)
 │
 ├── credebl/                       ← DPG Option A
 │   ├── docker-compose.yml         ← 13 CREDEBL services + MinIO + Mailpit + Keycloak
@@ -175,6 +177,22 @@ CREDEBL's `agent-provisioning` spawns the Credo controller container via the Doc
 
 This is hardcoded in `init-credebl.sh` and the `docker-compose.yml` fallback default. Do not change to the VPS hostname/IP.
 
+### Three required CREDEBL container patches (automated in init-credebl.sh)
+
+These patches fix bugs in the published CREDEBL Docker images. `init-credebl.sh` applies them automatically via `apply_container_patches()` after every `docker compose up`. All are idempotent.
+
+**Patch 1 — Utility service S3 → MinIO endpoint**
+AWS SDK v2 ignores `AWS_ENDPOINT` from environment. CREDEBL's utility service creates three S3 clients without an `endpoint` option, so all S3 calls go to real AWS and fail with "Access Key Id does not exist". Fix: add `endpoint: process.env.AWS_ENDPOINT` and `s3ForcePathStyle: true` to all three constructors in `/app/dist/apps/utility/main.js`.
+_Symptom if missing_: Wallet provisioning returns `{"statusCode":500,"message":"Something went wrong!"}`.
+
+**Patch 2 — API gateway @context validator allows Docker-internal hostnames**
+`IsCredentialJsonLdContext` calls `isURL(v)` with `require_tld: true` (default). Docker service names like `schema-file-server` have no TLD, so validation rejects them. Fix: `isURL(v, { require_tld: false })` in `/app/dist/apps/api-gateway/main.js`.
+_Symptom if missing_: W3C schema creation or credential issuance returns `400 "@context must be an array of strings or objects, where the first item is the verifiable credential context URL"`.
+
+**Patch 3 — Credo CredentialEvents.js crash in multi-tenancy root agent**
+In multi-tenancy mode the root agent's `agent.modules.credentials` is undefined. The bare `getFormatData()` call throws `TypeError: Cannot read properties of undefined`, crashing the event handler. Every subsequent issuance attempt then gets ECONNREFUSED. Fix: wrap in `try { if (agent.modules && agent.modules.credentials) {...} } catch(e) {}` in `/app/build/events/CredentialEvents.js` inside the spawned Credo container.
+_Symptom if missing_: Credential issuance returns `500 "Rpc Exception - connect ECONNREFUSED VPS_IP:8012"`.
+
 ### Why Studio is built locally (not pulled)
 Studio is a Next.js app with `NEXT_PUBLIC_*` build args that bake the VPS IP, OIDC config, and secrets into the image at build time. There is no pre-built image on any registry. `init-credebl.sh` checks for an existing `credebl-studio` image and skips the ~5-8 minute Next.js build on re-deployments. Answer N to the skip prompt only if the VPS IP or secrets changed.
 
@@ -224,6 +242,7 @@ INJI:    3001 (Inji Web), 5433 (Postgres), 6380 (Redis), 8088 (eSignet),
 ### Before Colombia (May 4)
 - [x] **`credebl-master-table.json`**: Built manually and included at `credebl/config/credebl-master-table.json`. Contains BCovrin Testnet + Indicio Testnet ledger configs and the minimum org_agents_type and client_config seed data. The `seed` service mounts it at `/app/libs/prisma-service/prisma/data/credebl-master-table.json`. Note: if CREDEBL's actual master table has additional fields or tables not reflected here, the seed service may log warnings but should not fail — Prisma's `upsert` pattern skips unknown fields.
 - [x] **Validate CREDEBL stack on real VPS**: Full end-to-end validated on April 17, 2026. All 35 health checks pass on first run of `init-credebl.sh`. Stack uses ~3.6GB RAM. Agent provisioning works reliably with `WALLET_STORAGE_HOST=172.17.0.1`.
+- [x] **Full E2E API flow validated**: April 18, 2026. `api-test.sh` passes all 8 steps: org creation → wallet provisioning (201) → DID did:key (201) → W3C JSON-LD schema (201) → OOB email credential issuance (201) → credential list (200). Three container patches are now automated in `init-credebl.sh` via `apply_container_patches()` — see critical notes below.
 - [ ] **Validate INJI stack on real VPS**: Startup order matters. eSignet must be fully healthy before Certify starts (90s wait). Test the mock OID4VCI flow end-to-end with UIN `5860356276` / OTP `111111`.
 - [ ] **Colombia use case**: Once confirmed, adapt the relevant schema template and update `certify-employment.properties` with the correct credential type and `vct` URL.
 - [ ] **INJI credential configs for education, professional-license, civil-identity**: `certify-employment.properties` exists but the other 3 schema configs for INJI are not yet created. Use `certify-employment.properties` as template.
