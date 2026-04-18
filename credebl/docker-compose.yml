@@ -315,11 +315,12 @@ services:
     environment:
       OOB_BATCH_SIZE: ${OOB_BATCH_SIZE:-50}
       PROOF_REQ_CONN_LIMIT: ${PROOF_REQ_CONN_LIMIT:-50}
-    # When SSL is enabled, KEYCLOAK_DOMAIN points to the public HTTPS domain.
-    # extra_hosts maps it to host-gateway so containers reach nginx (→ Keycloak)
-    # via the Docker bridge instead of trying the public IP directly.
+    # extra_hosts ensures VPS self-connections and domain-based agentEndPoint calls
+    # (e.g. http://credebl.example.com:8012) reach host-gateway (172.17.0.1-ish)
+    # instead of the public IP (which VPS providers block for self-connections).
     extra_hosts:
-      - "${VPS_IP}:host-gateway"
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
     ports:
       - "5000:5000"
     depends_on:
@@ -428,7 +429,8 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_IP}:host-gateway"
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
     depends_on:
       nats:
         condition: service_healthy
@@ -472,7 +474,8 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_IP}:host-gateway"
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
     depends_on:
       nats:
         condition: service_healthy
@@ -496,7 +499,8 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_IP}:host-gateway"
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
     environment:
       OOB_BATCH_SIZE: ${OOB_BATCH_SIZE:-50}
     depends_on:
@@ -524,7 +528,8 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_IP}:host-gateway"
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
     depends_on:
       nats:
         condition: service_healthy
@@ -550,7 +555,8 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_IP}:host-gateway"
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
     depends_on:
       nats:
         condition: service_healthy
@@ -578,7 +584,8 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_IP}:host-gateway"
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
     environment:
       PROOF_REQ_CONN_LIMIT: ${PROOF_REQ_CONN_LIMIT:-50}
     depends_on:
@@ -654,6 +661,9 @@ services:
     container_name: credebl-agent-service
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
     environment:
       PLATFORM_WALLET_NAME: ${PLATFORM_WALLET_NAME:-platformadminwallet}
       PLATFORM_WALLET_PASSWORD: ${PLATFORM_WALLET_PASSWORD:-platformadminwallet123}
@@ -701,7 +711,8 @@ services:
     restart: unless-stopped
     env_file: .env
     extra_hosts:
-      - "${VPS_IP}:host-gateway"
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
     depends_on:
       nats:
         condition: service_healthy
