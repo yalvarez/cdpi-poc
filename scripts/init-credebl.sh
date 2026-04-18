@@ -715,8 +715,8 @@ replacements = {
     # SHORTENED_URL_DOMAIN is intentionally empty — utility service builds /default/{uuid}
     # which gets concatenated directly onto DEEPLINK_DOMAIN
     "SHORTENED_URL_DOMAIN":             "",
-    "MOBILE_APP":                       "Inji Wallet",
-    "MOBILE_APP_NAME":                  "Inji Wallet",
+    "MOBILE_APP":                       '"Inji Wallet"',
+    "MOBILE_APP_NAME":                  '"Inji Wallet"',
     "MOBILE_APP_DOWNLOAD_URL":          "https://inji.mosip.io",
     "PLAY_STORE_DOWNLOAD_LINK":         "https://play.google.com/store/apps/details?id=io.mosip.residentapp",
 }
