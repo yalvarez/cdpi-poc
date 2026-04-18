@@ -1,18 +1,18 @@
 {
   "platformConfigData": {
-    "externalIp": "YOUR_VPS_IP",
-    "inboundEndpoint": "YOUR_VPS_IP",
+    "externalIp": "credebl.bootcamp.cdpi.dev",
+    "inboundEndpoint": "credebl.bootcamp.cdpi.dev",
     "username": "credebl",
     "sgApiKey": "mailpit-mock",
     "emailFrom": "noreply@cdpi-poc.local",
-    "apiEndpoint": "http://YOUR_VPS_IP:5000",
+    "apiEndpoint": "http://credebl.bootcamp.cdpi.dev:5000",
     "tailsFileServer": "https://tails.vonx.io"
   },
   "platformAdminData": {
     "firstName": "Platform",
     "lastName": "Admin",
-    "email": "admin@cdpi-poc.local",
-    "username": "admin@cdpi-poc.local",
+    "email": "ysaias@cdpi.dev",
+    "username": "ysaias@cdpi.dev",
     "password": "U2FsdGVkX1+WXl37vU7M6f58VHvclNFUsK08R8VHMTY=",
     "verificationCode": "",
     "isEmailVerified": true,
