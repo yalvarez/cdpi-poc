@@ -398,7 +398,7 @@ server {
         proxy_buffering off;
     }
 
-    # API gateway routes that already include /v1/ prefix
+    # API gateway — rutas con prefijo /v1/ (todas las llamadas del cliente Studio)
     location ~ ^/v1/ {
         proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
@@ -409,8 +409,8 @@ server {
         proxy_buffering off;
     }
 
-    # API gateway routes without /v1/ prefix — rewrite adds it
-    location ~ ^/(auth|users|orgs|agents|connections|credentials|verification|schemas|ledger|ecosystems|platform-settings|bulk-verification)(/|\$) {
+    # NextAuth llama /auth/signin server-side sin /v1/ — rewrite lo añade
+    location ~ ^/auth/ {
         rewrite ^/(.*)\$ /v1/\$1 break;
         proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
@@ -421,7 +421,21 @@ server {
         proxy_buffering off;
     }
 
-    # Studio catch-all (Next.js)
+    # Socket.IO — WebSocket para eventos en tiempo real del API gateway
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_read_timeout 86400;
+        proxy_buffering off;
+    }
+
+    # Studio — catch-all (Next.js pages: /credentials, /connections, /schemas, etc.)
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -495,7 +509,7 @@ server {
         proxy_buffering off;
     }
 
-    # API gateway routes that already include the /v1/ prefix
+    # API gateway — rutas con prefijo /v1/ (Studio siempre incluye /v1/ en sus llamadas)
     location ~ ^/v1/ {
         proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
@@ -506,9 +520,11 @@ server {
         proxy_buffering off;
     }
 
-    # API gateway routes without /v1/ prefix — rewrite adds it before proxying.
-    # Studio calls these without the prefix; Nginx adds it transparently.
-    location ~ ^/(auth|users|orgs|agents|connections|credentials|verification|schemas|ledger|ecosystems|platform-settings|bulk-verification)(/|\$) {
+    # API gateway — NextAuth llama GET /auth/sessionDetails SIN prefijo /v1/
+    # El rewrite agrega /v1/ antes de pasar al API gateway (puerto 5000)
+    # NOTA: /api/auth/* ya está capturado por el bloque ^~ de arriba; este bloque
+    # solo aplica a /auth/... (sin /api/ adelante)
+    location ~ ^/auth/ {
         rewrite ^/(.*)\$ /v1/\$1 break;
         proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
@@ -519,7 +535,21 @@ server {
         proxy_buffering off;
     }
 
-    # Studio catch-all (Next.js — handles all UI routes and /api/* server routes)
+    # Socket.IO — WebSocket para eventos en tiempo real del API gateway
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 86400;
+        proxy_buffering off;
+    }
+
+    # Studio catch-all (Next.js — maneja /credentials, /connections, /orgs y todas las rutas UI)
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;

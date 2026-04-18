@@ -167,16 +167,16 @@ if (content.includes('s3ForcePathStyle')) { process.stdout.write('  already patc
 // Add endpoint + s3ForcePathStyle before the closing }).
 content = content
   .replace(
-    'region: process.env.AWS_REGION\n        })',
-    'region: process.env.AWS_REGION,\n            endpoint: process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        })'
+    'region: process.env.AWS_REGION\n        });',
+    'region: process.env.AWS_REGION,\n            endpoint: process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        });'
   )
   .replace(
-    'region: process.env.AWS_PUBLIC_REGION\n        })',
-    'region: process.env.AWS_PUBLIC_REGION,\n            endpoint: process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        })'
+    'region: process.env.AWS_PUBLIC_REGION\n        });',
+    'region: process.env.AWS_PUBLIC_REGION,\n            endpoint: process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        });'
   )
   .replace(
-    'region: process.env.AWS_S3_STOREOBJECT_REGION\n        })',
-    'region: process.env.AWS_S3_STOREOBJECT_REGION,\n            endpoint: process.env.AWS_S3_STOREOBJECT_ENDPOINT || process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        })'
+    'region: process.env.AWS_S3_STOREOBJECT_REGION\n        });',
+    'region: process.env.AWS_S3_STOREOBJECT_REGION,\n            endpoint: process.env.AWS_S3_STOREOBJECT_ENDPOINT || process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        });'
   );
 if (!content.includes('s3ForcePathStyle')) { process.stderr.write('  ERROR: patch pattern not found — CREDEBL image may have changed\n'); process.exit(1); }
 fs.writeFileSync(path, content);
@@ -233,6 +233,25 @@ JSEOF
   docker restart "$credo_container" >/dev/null
 }
 
+patch_issuance_schema_url() {
+  # Studio's URL builder function incorrectly prepends http:// to URLs that already
+  # have it (regex matches http://host:port/schemas/ as host:port/schemas/).
+  # This patch strips duplicate http:// prefixes in getW3CSchemaAttributes before fetch.
+  # Uses indexOf instead of regex literal to avoid escaping issues in heredoc.
+  docker exec -u root credebl-issuance node - <<'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/issuance/main.js';
+let content = fs.readFileSync(path, 'utf8');
+if (content.includes('indexOf("://http")')) { process.stdout.write('  already patched\n'); process.exit(0); }
+const target = 'async getW3CSchemaAttributes(schemaUrl) {';
+if (!content.includes(target)) { process.stderr.write('  ERROR: patch target not found\n'); process.exit(1); }
+const fixLines = ' while (schemaUrl && schemaUrl.indexOf("://http") > 0) { schemaUrl = schemaUrl.replace(/^https?:\\/\\//, ""); }';
+content = content.replace(target, target + fixLines);
+fs.writeFileSync(path, content);
+process.stdout.write('  patched\n');
+JSEOF
+}
+
 apply_container_patches() {
   echo
   echo "Applying CREDEBL container patches..."
@@ -243,6 +262,10 @@ apply_container_patches() {
   echo -n "  API gateway @context validator (require_tld): "
   patch_api_gateway_context_validator
   docker restart credebl-api-gateway >/dev/null
+
+  echo -n "  Issuance service schema URL deduplication: "
+  patch_issuance_schema_url
+  docker restart credebl-issuance >/dev/null
 
   echo "  Waiting for restarted containers to be ready..."
   local deadline=$(( $(date +%s) + 60 ))
@@ -589,15 +612,11 @@ API_ENDPOINT="${VPS_HOST}:5000"           # bare host:port — no protocol prefi
 PLATFORM_WEB_URL="${PROTOCOL}://${VPS_HOST}:5000"
 SOCKET_HOST="${PROTOCOL}://${VPS_HOST}:5000"
 ENABLE_CORS_IP_LIST="${STUDIO_URL},http://localhost:3000,http://127.0.0.1:3000"
-# DEEPLINK_DOMAIN: base URL embedded in OOB email invitations so wallet apps can
-# open the deep link. For HTTPS deployments, setup-keycloak-https.sh updates this.
-if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_VPS_DOMAIN" ]; then
-  DEEPLINK_DOMAIN="https://${SSL_VPS_DOMAIN}"
-elif [ "$ENABLE_SSL" = "true" ]; then
-  DEEPLINK_DOMAIN="https://${SSL_KEYCLOAK_DOMAIN}"
-else
-  DEEPLINK_DOMAIN="${PLATFORM_WEB_URL}"
-fi
+# DEEPLINK_DOMAIN: prepended to /default/{uuid} to build the Accept Credential link.
+# Points to MinIO so wallets can fetch the OOB invitation JSON stored there.
+# SHORTENED_URL_DOMAIN is set to empty — the utility service builds /default/{uuid}
+# which gets concatenated directly onto DEEPLINK_DOMAIN.
+DEEPLINK_DOMAIN="http://${VPS_HOST}:9000/credebl-bucket"
 
 # =============================================================================
 # WRITE .env FROM TEMPLATE
@@ -654,8 +673,15 @@ replacements = {
     "MINIO_ROOT_PASSWORD":              e("MINIO_ROOT_PASSWORD"),
     "AWS_ACCESS_KEY_ID":                e("AWS_ACCESS_KEY_ID"),
     "AWS_SECRET_ACCESS_KEY":            e("AWS_SECRET_ACCESS_KEY"),
+    # Aliases used by the utility service (reads AWS_ACCESS_KEY, not AWS_ACCESS_KEY_ID)
+    "AWS_ACCESS_KEY":                   e("AWS_ACCESS_KEY_ID"),
+    "AWS_SECRET_KEY":                   e("AWS_SECRET_ACCESS_KEY"),
+    "AWS_PUBLIC_ACCESS_KEY":            e("AWS_ACCESS_KEY_ID"),
+    "AWS_PUBLIC_SECRET_KEY":            e("AWS_SECRET_ACCESS_KEY"),
+    "AWS_PUBLIC_REGION":                "us-east-1",
     "AWS_S3_STOREOBJECT_ACCESS_KEY":    e("AWS_ACCESS_KEY_ID"),
     "AWS_S3_STOREOBJECT_SECRET_KEY":    e("AWS_SECRET_ACCESS_KEY"),
+    "AWS_S3_STOREOBJECT_ENDPOINT":      "http://minio:9000",
     "PLATFORM_SEED":                    e("PLATFORM_SEED"),
     "PLATFORM_WALLET_NAME":             e("PLATFORM_WALLET_NAME"),
     "PLATFORM_WALLET_PASSWORD":         e("PLATFORM_WALLET_PASSWORD"),
@@ -686,6 +712,13 @@ replacements = {
     "ENABLE_CORS_IP_LIST":              e("ENABLE_CORS_IP_LIST"),
     "APP_PROTOCOL":                     e("PROTOCOL"),
     "DEEPLINK_DOMAIN":                  e("DEEPLINK_DOMAIN"),
+    # SHORTENED_URL_DOMAIN is intentionally empty — utility service builds /default/{uuid}
+    # which gets concatenated directly onto DEEPLINK_DOMAIN
+    "SHORTENED_URL_DOMAIN":             "",
+    "MOBILE_APP":                       "Inji Wallet",
+    "MOBILE_APP_NAME":                  "Inji Wallet",
+    "MOBILE_APP_DOWNLOAD_URL":          "https://inji.mosip.io",
+    "PLAY_STORE_DOWNLOAD_LINK":         "https://play.google.com/store/apps/details?id=io.mosip.residentapp",
 }
 
 for key, value in replacements.items():
