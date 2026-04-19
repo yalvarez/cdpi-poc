@@ -221,7 +221,17 @@ On a fresh CREDEBL deployment, `org_agents.tenantId` is NULL and `org_agents.api
 **Symptoms when this is broken**:
 - `POST /orgs/{id}/agents/did` → 500 `"Unauthorized"` (agent-service log: `"Basewallet can only manage tenants"`)
 - `POST /orgs/{id}/agents/did` → 500 `"Invalid Credentials"` (agent-service log: `"Agent api key details: Invalid Credentials"`) — means `apiKey` is empty or corrupt
+- `POST /orgs/{id}/agents/did` → 404 `"API key is not found"` — means `org_agents.tenantId` is NULL or the tenant JWT is stale (Credo was restarted). Same fix: create/refresh tenant JWT.
 - `POST /auth/signin` → 400 `"Invalid Credentials"` — unrelated but common trap: CREDEBL's API expects the password **CryptoJS AES-encrypted** (`CryptoJS.AES.encrypt(JSON.stringify(password), CRYPTO_PRIVATE_KEY)`). Studio encrypts automatically; raw passwords always fail the `/auth/signin` endpoint.
+
+**Recovery for any org (not just Platform-admin)** whose wallet provisioning failed (`agentSpinUpStatus=1`, empty `tenantId`/`apiKey`): this happens when Credo was restarting while Studio tried to create the shared wallet (NATS response was lost). Manual fix:
+1. `POST {agentEndPoint}/agent/token` → get root JWT
+2. `POST {agentEndPoint}/multi-tenancy/create-tenant` with `{"config":{"label":"<org name>"}}` → get tenantId
+3. `POST {agentEndPoint}/multi-tenancy/get-token/{tenantId}` → get tenant JWT
+4. Encrypt JWT with CryptoJS: `CryptoJS.AES.encrypt(JSON.stringify(jwt), CRYPTO_PRIVATE_KEY)`
+5. `UPDATE org_agents SET tenantId=..., apiKey=..., agentEndPoint=..., agentSpinUpStatus=2, orgAgentTypeId='bf4cde73-5dfa-4d36-a65f-1352b7385da4', walletName=... WHERE id=...`
+   - SHARED agent type UUID: `bf4cde73-5dfa-4d36-a65f-1352b7385da4`
+   - agentEndPoint = Platform-admin's Credo endpoint (e.g. `http://VPS:8002`)
 
 ### Why Studio is built locally (not pulled)
 Studio is a Next.js app with `NEXT_PUBLIC_*` build args that bake the VPS IP, OIDC config, and secrets into the image at build time. There is no pre-built image on any registry. `init-credebl.sh` checks for an existing `credebl-studio` image and skips the ~5-8 minute Next.js build on re-deployments. Answer N to the skip prompt only if the VPS IP or secrets changed.
