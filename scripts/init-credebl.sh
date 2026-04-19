@@ -158,13 +158,14 @@ patch_utility_s3() {
   # Without this patch, S3 calls from the utility service go to real AWS
   # and fail with "The AWS Access Key Id you provided does not exist".
   # We add endpoint + s3ForcePathStyle:true to all three S3 client constructors.
-  docker exec credebl-utility node - <<'JSEOF'
+  # Uses docker cp + --user root because the process runs as uid=1001 (read-only /app).
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_utility_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
 const fs = require('fs');
 const path = '/app/dist/apps/utility/main.js';
 let content = fs.readFileSync(path, 'utf8');
-if (content.includes('s3ForcePathStyle')) { process.stdout.write('  already patched\n'); process.exit(0); }
-// The three constructors end with `region: process.env.AWS_*_REGION\n        });`
-// Add endpoint + s3ForcePathStyle before the closing }).
+if (content.includes('s3ForcePathStyle')) { process.stdout.write('already patched\n'); process.exit(0); }
 content = content
   .replace(
     'region: process.env.AWS_REGION\n        });',
@@ -178,31 +179,47 @@ content = content
     'region: process.env.AWS_S3_STOREOBJECT_REGION\n        });',
     'region: process.env.AWS_S3_STOREOBJECT_REGION,\n            endpoint: process.env.AWS_S3_STOREOBJECT_ENDPOINT || process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        });'
   );
-if (!content.includes('s3ForcePathStyle')) { process.stderr.write('  ERROR: patch pattern not found — CREDEBL image may have changed\n'); process.exit(1); }
+if (!content.includes('s3ForcePathStyle')) { process.stderr.write('ERROR: patch pattern not found — CREDEBL image may have changed\n'); process.exit(1); }
 fs.writeFileSync(path, content);
-process.stdout.write('  patched\n');
+process.stdout.write('patched\n');
 JSEOF
+  docker cp "$patch_script" credebl-utility:/tmp/patch_utility.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-utility node /tmp/patch_utility.js
 }
 
 patch_api_gateway_context_validator() {
   # IsCredentialJsonLdContext validator calls isURL(v) with default require_tld:true.
   # This rejects Docker-internal hostnames like schema-file-server (no TLD).
   # Adding require_tld:false allows internal hostnames in @context arrays.
-  docker exec credebl-api-gateway node - <<'JSEOF'
+  #
+  # Implementation notes:
+  # - The api-gateway process runs as uid=1001 (nextjs), not root — cannot write to /app.
+  # - Heredoc via `docker exec ... node -` is unreliable inside SSH quoted commands.
+  # - Solution: write the patch script to a temp file on the host, docker cp it in,
+  #   then exec as --user root.
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_api_gw_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
 const fs = require('fs');
 const path = '/app/dist/apps/api-gateway/main.js';
 let content = fs.readFileSync(path, 'utf8');
 const target = '(0, class_validator_1.isURL)(v)';
 const replacement = '(0, class_validator_1.isURL)(v, { require_tld: false })';
-// Only patch the occurrence inside the IsCredentialJsonLdContext validator
-const validatorIdx = content.indexOf('IsCredentialJsonLdContext');
-if (validatorIdx < 0) { process.stderr.write('  ERROR: IsCredentialJsonLdContext not found\n'); process.exit(1); }
-const after = content.indexOf(target, validatorIdx);
-if (after < 0 || after > validatorIdx + 2000) { process.stdout.write('  already patched or pattern changed\n'); process.exit(0); }
+// Find the FUNCTION DEFINITION — the decorator usage appears ~33k chars earlier in the bundle
+// so we must anchor to 'function IsCredentialJsonLdContext', not just 'IsCredentialJsonLdContext'.
+const funcIdx = content.indexOf('function IsCredentialJsonLdContext');
+if (funcIdx < 0) { process.stderr.write('ERROR: function IsCredentialJsonLdContext not found\n'); process.exit(1); }
+const after = content.indexOf(target, funcIdx);
+// The isURL call is ~500 chars after the function definition
+if (after < 0 || after > funcIdx + 1000) { process.stdout.write('already patched\n'); process.exit(0); }
 content = content.substring(0, after) + replacement + content.substring(after + target.length);
 fs.writeFileSync(path, content);
-process.stdout.write('  patched\n');
+process.stdout.write('patched\n');
 JSEOF
+  docker cp "$patch_script" credebl-api-gateway:/tmp/patch_api_gw.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-api-gateway node /tmp/patch_api_gw.js
 }
 
 patch_credo_credential_events() {
@@ -215,21 +232,26 @@ patch_credo_credential_events() {
     echo "  No Credo controller container found — skipping."
     return 0
   fi
-  docker exec "$credo_container" node - <<'JSEOF'
+  # Credo containers also run as uid=1001 — use docker cp + --user root.
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_credo_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
 const fs = require('fs');
 const path = '/app/build/events/CredentialEvents.js';
 let content = fs.readFileSync(path, 'utf8');
-if (content.includes('getFormatData unavailable')) { process.stdout.write('  already patched\n'); process.exit(0); }
-// Match the bare getFormatData call at any indentation level (the two lines we need to wrap)
+if (content.includes('getFormatData unavailable')) { process.stdout.write('already patched\n'); process.exit(0); }
 const pattern = /^(\s+)const data = await agent\.modules\.credentials\.getFormatData\(record\.id\);\n\s+body\.credentialData = data;/m;
 const m = content.match(pattern);
-if (!m) { process.stderr.write('  ERROR: patch target not found in CredentialEvents.js\n'); process.exit(1); }
-const indent = m[1]; // preserve original indentation
+if (!m) { process.stderr.write('ERROR: patch target not found in CredentialEvents.js\n'); process.exit(1); }
+const indent = m[1];
 const replacement = `${indent}try {\n${indent}    if (agent.modules && agent.modules.credentials) {\n${indent}        const data = await agent.modules.credentials.getFormatData(record.id);\n${indent}        body.credentialData = data;\n${indent}    }\n${indent}} catch (e) {\n${indent}    // getFormatData unavailable in this agent context (e.g. multi-tenancy root agent)\n${indent}}`;
 content = content.replace(pattern, replacement);
 fs.writeFileSync(path, content);
-process.stdout.write('  patched\n');
+process.stdout.write('patched\n');
 JSEOF
+  docker cp "$patch_script" "${credo_container}:/tmp/patch_credo.js"
+  rm -f "$patch_script"
+  docker exec --user root "$credo_container" node /tmp/patch_credo.js
   docker restart "$credo_container" >/dev/null
 }
 
@@ -238,18 +260,24 @@ patch_issuance_schema_url() {
   # have it (regex matches http://host:port/schemas/ as host:port/schemas/).
   # This patch strips duplicate http:// prefixes in getW3CSchemaAttributes before fetch.
   # Uses indexOf instead of regex literal to avoid escaping issues in heredoc.
-  docker exec -u root credebl-issuance node - <<'JSEOF'
+  # Uses docker cp + --user root (issuance runs as uid=1001, read-only /app).
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_issuance_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
 const fs = require('fs');
 const path = '/app/dist/apps/issuance/main.js';
 let content = fs.readFileSync(path, 'utf8');
-if (content.includes('indexOf("://http")')) { process.stdout.write('  already patched\n'); process.exit(0); }
+if (content.includes('indexOf("://http")')) { process.stdout.write('already patched\n'); process.exit(0); }
 const target = 'async getW3CSchemaAttributes(schemaUrl) {';
-if (!content.includes(target)) { process.stderr.write('  ERROR: patch target not found\n'); process.exit(1); }
+if (!content.includes(target)) { process.stderr.write('ERROR: patch target not found\n'); process.exit(1); }
 const fixLines = ' while (schemaUrl && schemaUrl.indexOf("://http") > 0) { schemaUrl = schemaUrl.replace(/^https?:\\/\\//, ""); }';
 content = content.replace(target, target + fixLines);
 fs.writeFileSync(path, content);
-process.stdout.write('  patched\n');
+process.stdout.write('patched\n');
 JSEOF
+  docker cp "$patch_script" credebl-issuance:/tmp/patch_issuance.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-issuance node /tmp/patch_issuance.js
 }
 
 apply_container_patches() {
