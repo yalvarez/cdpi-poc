@@ -270,7 +270,10 @@ let content = fs.readFileSync(path, 'utf8');
 if (content.includes('indexOf("://http")')) { process.stdout.write('already patched\n'); process.exit(0); }
 const target = 'async getW3CSchemaAttributes(schemaUrl) {';
 if (!content.includes(target)) { process.stderr.write('ERROR: patch target not found\n'); process.exit(1); }
-const fixLines = ' while (schemaUrl && schemaUrl.indexOf("://http") > 0) { schemaUrl = schemaUrl.replace(/^https?:\\/\\//, ""); }';
+// Use slice+indexOf only — NO regex literals. A regex literal /^https?:\/\// inserted via
+// string concatenation becomes /^https?:///, where // terminates the regex prematurely,
+// causing "SyntaxError: missing ) after argument list" when the patched bundle is loaded.
+const fixLines = ' while (schemaUrl && schemaUrl.indexOf("://http") > 0) { schemaUrl = schemaUrl.slice(schemaUrl.indexOf("://") + 3); }';
 content = content.replace(target, target + fixLines);
 fs.writeFileSync(path, content);
 process.stdout.write('patched\n');
@@ -285,15 +288,15 @@ apply_container_patches() {
   echo "Applying CREDEBL container patches..."
   echo -n "  Utility service S3 → MinIO endpoint: "
   patch_utility_s3
-  docker restart credebl-utility >/dev/null
+  docker compose restart utility >/dev/null
 
   echo -n "  API gateway @context validator (require_tld): "
   patch_api_gateway_context_validator
-  docker restart credebl-api-gateway >/dev/null
+  docker compose restart api-gateway >/dev/null
 
   echo -n "  Issuance service schema URL deduplication: "
   patch_issuance_schema_url
-  docker restart credebl-issuance >/dev/null
+  docker compose restart issuance >/dev/null
 
   echo "  Waiting for restarted containers to be ready..."
   local deadline=$(( $(date +%s) + 60 ))
