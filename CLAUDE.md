@@ -177,7 +177,7 @@ CREDEBL's `agent-provisioning` spawns the Credo controller container via the Doc
 
 This is hardcoded in `init-credebl.sh` and the `docker-compose.yml` fallback default. Do not change to the VPS hostname/IP.
 
-### Three required CREDEBL container patches (automated in init-credebl.sh)
+### Five required CREDEBL container patches (automated in init-credebl.sh)
 
 These patches fix bugs in the published CREDEBL Docker images. `init-credebl.sh` applies them automatically via `apply_container_patches()` after every `docker compose up`. All are idempotent.
 
@@ -193,7 +193,15 @@ _Symptom if missing_: W3C schema creation or credential issuance returns `400 "@
 In multi-tenancy mode the root agent's `agent.modules.credentials` is undefined. The bare `getFormatData()` call throws `TypeError: Cannot read properties of undefined`, crashing the event handler. Every subsequent issuance attempt then gets ECONNREFUSED. Fix: wrap in `try { if (agent.modules && agent.modules.credentials) {...} } catch(e) {}` in `/app/build/events/CredentialEvents.js` inside the spawned Credo container.
 _Symptom if missing_: Credential issuance returns `500 "Rpc Exception - connect ECONNREFUSED VPS_IP:8012"`.
 
-### Platform-admin tenant wallet and DID creation (Patch 4 — automated in init-credebl.sh)
+**Patch 4 — Issuance service schema URL deduplication (getW3CSchemaAttributes)**
+Studio's URL builder prepends `http://` to the `schemaLedgerId` even when it already starts with `http://`, producing `http://http://schema-file-server:4000/schemas/...`. CREDEBL's `getW3CSchemaAttributes` uses this URL to fetch the schema JSON — the double-prefixed URL 404s. Fix: insert a `while (schemaUrl.indexOf("://http") > 0)` stripping loop at the start of `getW3CSchemaAttributes` in `/app/dist/apps/issuance/main.js`. Uses string operations only — no regex literals (regex literals in string-concatenated bundles lose backslashes and produce `SyntaxError`).
+_Symptom if missing_: Credential issuance returns `500 "Something went wrong!"` with agent-service log showing a 404 on the schema URL.
+
+**Patch 5 — Issuance service @context triple-prefix (outOfBandCredentialOffer)**
+When Studio builds the OOB JSON-LD credential offer, it prepends `http://` to the schema URL again — now the `@context` array sent to Credo contains `"http://http://http://schema-file-server:4000/schemas/..."`. Credo rejects this with 400. Fix: insert a normalization loop after `this.logger.debug('Validated/Updated Issuance dates credential offer')` in `outOfBandCredentialOffer` that strips duplicate `://http` prefixes from every URL in `offer.credential['@context']`. Guard string: `ctx.map(function(url)`.
+_Symptom if missing_: Credential issuance returns `500 "Something went wrong!"` or `500 "Cannot read properties of undefined (reading 'status')"` — Credo returns 400 which becomes an unhandled error in the issuance service.
+
+### Platform-admin tenant wallet and DID creation (Patch — automated in init-credebl.sh)
 
 **Root cause**: CREDEBL's Credo controller runs in multi-tenancy mode. The platform-admin org has `orgAgentType = DEDICATED` — its `agentEndPoint` points to the shared Credo container. For DEDICATED agents, `agent-service` decrypts `org_agents.apiKey` and uses it directly as the `Authorization` header for every Credo API call. In multi-tenant Credo, a `RestRootAgentWithTenants` JWT cannot perform DID operations — Credo rejects it with `"Basewallet can only manage tenants"`. Only a `RestTenantAgent` JWT (scoped to a specific tenant ID) can write DIDs and issue credentials.
 

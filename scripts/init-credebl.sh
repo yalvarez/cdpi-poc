@@ -283,6 +283,35 @@ JSEOF
   docker exec --user root credebl-issuance node /tmp/patch_issuance.js
 }
 
+patch_issuance_context_urls() {
+  # Studio's credential offer builder triple-prepends http:// to @context URLs,
+  # producing "http://http://http://schema-file-server:4000/schemas/...".
+  # Credo rejects these malformed URLs with 400 "@context must be an array of strings".
+  # This patch normalizes @context URL arrays in outOfBandCredentialOffer right
+  # after the JSONLD branch validates/updates issuance dates.
+  # Uses indexOf-based loop (no regex literals) and docker cp + --user root.
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_issuance_ctx_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/issuance/main.js';
+let content = fs.readFileSync(path, 'utf8');
+if (content.includes('ctx.map(function(url)')) { process.stdout.write('already patched\n'); process.exit(0); }
+const target = "'Validated/Updated Issuance dates credential offer'";
+const idx = content.indexOf(target);
+if (idx < 0) { process.stderr.write('ERROR: patch target not found in issuance/main.js\n'); process.exit(1); }
+// Insert normalization right after the logger.debug call's closing semicolon
+const insertAfter = content.indexOf(';', idx) + 1;
+const normCode = ' if (credentialOffer) { for (const offer of credentialOffer) { const ctx = offer && offer.credential && offer.credential["@context"]; if (Array.isArray(ctx)) { offer.credential["@context"] = ctx.map(function(url) { while (typeof url === "string" && url.indexOf("://http") > 0) { url = url.slice(url.indexOf("://") + 3); } return url; }); } } }';
+content = content.substring(0, insertAfter) + normCode + content.substring(insertAfter);
+fs.writeFileSync(path, content);
+process.stdout.write('patched\n');
+JSEOF
+  docker cp "$patch_script" credebl-issuance:/tmp/patch_issuance_ctx.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-issuance node /tmp/patch_issuance_ctx.js
+}
+
 apply_container_patches() {
   echo
   echo "Applying CREDEBL container patches..."
@@ -296,6 +325,8 @@ apply_container_patches() {
 
   echo -n "  Issuance service schema URL deduplication: "
   patch_issuance_schema_url
+  echo -n "  Issuance service @context URL normalization: "
+  patch_issuance_context_urls
   docker compose restart issuance >/dev/null
 
   echo "  Waiting for restarted containers to be ready..."
