@@ -725,6 +725,31 @@ services:
         limits:
           memory: 256M
 
+  # ── Ecosystem service ────────────────────────────────────────────────────────
+  ecosystem:
+    image: ghcr.io/credebl/ecosystem:latest
+    container_name: credebl-ecosystem
+    restart: unless-stopped
+    env_file: .env
+    extra_hosts:
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      user:
+        condition: service_started
+      organization:
+        condition: service_started
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
 # ---------------------------------------------------------------------------
 # Volumes
 # ---------------------------------------------------------------------------

@@ -587,16 +587,13 @@ SCHEMA_FILE_SERVER_TOKEN="$(generate_hs256_jwt "$JWT_TOKEN_SECRET" "Credebl")"
 
 PROTOCOL="http"
 
-# Internal URLs — CREDEBL microservices reach Keycloak inside Docker
-if [ "$KEYCLOAK_HOST" = "$VPS_HOST" ]; then
-  # Same machine: use Docker service name for internal traffic
-  KEYCLOAK_DOMAIN_INTERNAL="http://keycloak:8080/"
-  KEYCLOAK_ADMIN_URL_INTERNAL="http://keycloak:8080"
-else
-  # External Keycloak: use its host directly
-  KEYCLOAK_DOMAIN_INTERNAL="http://${KEYCLOAK_HOST}:8080/"
-  KEYCLOAK_ADMIN_URL_INTERNAL="http://${KEYCLOAK_HOST}:8080"
-fi
+# Internal URLs — CREDEBL microservices reach Keycloak inside Docker.
+# Always use the Docker service name for internal traffic; Keycloak runs in the
+# same Docker Compose stack regardless of what public subdomain it is assigned.
+# Using the external hostname here causes the admin API to return 403 when
+# KC_HOSTNAME is set to an HTTPS domain (issuer mismatch on the admin API path).
+KEYCLOAK_DOMAIN_INTERNAL="http://keycloak:8080/"
+KEYCLOAK_ADMIN_URL_INTERNAL="http://keycloak:8080"
 
 # Public URL — used by wallets and browsers; becomes HTTPS when SSL is enabled
 if [ "$ENABLE_SSL" = "true" ]; then
@@ -605,12 +602,29 @@ else
   KEYCLOAK_PUBLIC_URL="http://${KEYCLOAK_HOST}:8080"
 fi
 
-# API and Studio always use HTTP on their ports for the PoC
-# (SSL is only for the Keycloak OIDC endpoint via nginx reverse proxy)
-STUDIO_URL="${PROTOCOL}://${VPS_HOST}:3000"
-API_ENDPOINT="${VPS_HOST}:5000"           # bare host:port — no protocol prefix
-PLATFORM_WEB_URL="${PROTOCOL}://${VPS_HOST}:5000"
-SOCKET_HOST="${PROTOCOL}://${VPS_HOST}:5000"
+# When a VPS domain with SSL is configured, Studio and the API gateway are both
+# served from that domain via nginx on port 443 — no bare port in the URL.
+# NEXT_PUBLIC_BASE_URL is baked into the Studio bundle at build time, so
+# PROTOCOL must be set to https here (before docker compose build runs) rather
+# than being patched afterwards by setup-keycloak-https.sh.
+if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_VPS_DOMAIN" ]; then
+  PROTOCOL="https"
+  VPS_PUBLIC_HOST="$SSL_VPS_DOMAIN"
+else
+  VPS_PUBLIC_HOST="$VPS_HOST"
+fi
+
+if [ "$PROTOCOL" = "https" ]; then
+  STUDIO_URL="https://${VPS_PUBLIC_HOST}"
+  API_ENDPOINT="${VPS_PUBLIC_HOST}"         # bare host, no port — nginx proxies on 443
+  PLATFORM_WEB_URL="https://${VPS_PUBLIC_HOST}"
+  SOCKET_HOST="https://${VPS_PUBLIC_HOST}"
+else
+  STUDIO_URL="http://${VPS_PUBLIC_HOST}:3000"
+  API_ENDPOINT="${VPS_PUBLIC_HOST}:5000"    # bare host:port — no protocol prefix
+  PLATFORM_WEB_URL="http://${VPS_PUBLIC_HOST}:5000"
+  SOCKET_HOST="http://${VPS_PUBLIC_HOST}:5000"
+fi
 ENABLE_CORS_IP_LIST="${STUDIO_URL},http://localhost:3000,http://127.0.0.1:3000"
 # DEEPLINK_DOMAIN: prepended to /default/{uuid} to build the Accept Credential link.
 # Points to MinIO so wallets can fetch the OOB invitation JSON stored there.
@@ -636,7 +650,7 @@ export ENV_TEMPLATE ENV_FILE MASTER_TABLE \
   PLATFORM_SEED PLATFORM_WALLET_NAME PLATFORM_WALLET_PASSWORD \
   AGENT_API_KEY JWT_SECRET NEXTAUTH_SECRET JWT_TOKEN_SECRET \
   SCHEMA_FILE_SERVER_TOKEN CRYPTO_PRIVATE_KEY ADMIN_KEYCLOAK_ID ADMIN_KEYCLOAK_SECRET \
-  PLATFORM_ADMIN_EMAIL VPS_HOST KEYCLOAK_HOST PROTOCOL \
+  PLATFORM_ADMIN_EMAIL VPS_HOST VPS_PUBLIC_HOST KEYCLOAK_HOST PROTOCOL \
   KEYCLOAK_DOMAIN_INTERNAL KEYCLOAK_ADMIN_URL_INTERNAL KEYCLOAK_PUBLIC_URL \
   STUDIO_URL API_ENDPOINT PLATFORM_WEB_URL SOCKET_HOST ENABLE_CORS_IP_LIST DEEPLINK_DOMAIN
 
@@ -737,9 +751,11 @@ env_file.write_text(text, encoding="utf-8")
 config = json.loads(master_table.read_text(encoding="utf-8"))
 
 pc = config.setdefault("platformConfigData", {})
-pc["externalIp"]      = e("VPS_HOST")
-pc["inboundEndpoint"] = e("VPS_HOST")
-pc["apiEndpoint"]     = f"{e('PROTOCOL')}://{e('VPS_HOST')}:5000"
+pc["externalIp"]      = e("VPS_PUBLIC_HOST")
+pc["inboundEndpoint"] = e("VPS_PUBLIC_HOST")
+# When HTTPS + VPS_DOMAIN: API is on port 443 via nginx (no explicit port in URL)
+api_port = "" if e("PROTOCOL") == "https" else ":5000"
+pc["apiEndpoint"]     = f"{e('PROTOCOL')}://{e('VPS_PUBLIC_HOST')}{api_port}"
 config["platformConfigData"] = pc
 
 pa = config.setdefault("platformAdminData", {})
