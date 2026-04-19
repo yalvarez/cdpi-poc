@@ -477,6 +477,120 @@ ensure_platform_admin_shared_agent() {
   return 1
 }
 
+# Create a multi-tenancy tenant for the Platform-admin org inside the shared Credo
+# agent and store the encrypted tenant JWT in org_agents.apiKey. This is required
+# because CREDEBL's agent-service (DEDICATED type) passes the decrypted apiKey
+# directly as the Authorization header on Credo calls — Credo routes by the
+# tenantId embedded in the RestTenantAgent JWT.
+#
+# The tenant JWT is signed with Credo's random secretKey (generated at container
+# startup and stored in Askar wallet). It does NOT expire (no exp claim) and
+# remains valid as long as the Credo container is not restarted. If the Credo
+# container is ever restarted, re-run this function to refresh the stored JWT.
+ensure_platform_admin_tenant() {
+  echo
+  echo "Ensuring Platform-admin tenant wallet is set up in the Credo agent..."
+
+  # Get the agent endpoint from DB
+  local endpoint tenant_id
+  endpoint="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -Atqc "
+      SELECT oa.\"agentEndPoint\" FROM org_agents oa
+      JOIN organisation o ON o.id = oa.\"orgId\"
+      WHERE o.name = 'Platform-admin' AND oa.\"agentSpinUpStatus\" = 2
+      LIMIT 1;" 2>/dev/null | tr -d '\r')"
+
+  if [ -z "$endpoint" ]; then
+    echo "  Error: Platform-admin agent endpoint not found in DB." >&2
+    return 1
+  fi
+
+  # Normalize endpoint (ensure http:// prefix)
+  [[ "$endpoint" =~ ^https?:// ]] || endpoint="http://${endpoint}"
+
+  # Get Credo root JWT
+  local root_jwt
+  root_jwt="$(curl -sf --max-time 10 -X POST \
+    -H "Authorization: $AGENT_API_KEY" \
+    "${endpoint}/agent/token" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)"
+
+  if [ -z "$root_jwt" ]; then
+    echo "  Error: Failed to get root JWT from Credo agent at ${endpoint}." >&2
+    return 1
+  fi
+
+  # Check if tenant already exists in DB
+  tenant_id="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -Atqc "
+      SELECT COALESCE(oa.\"tenantId\", '') FROM org_agents oa
+      JOIN organisation o ON o.id = oa.\"orgId\"
+      WHERE o.name = 'Platform-admin'
+      LIMIT 1;" 2>/dev/null | tr -d '\r')"
+
+  if [ -z "$tenant_id" ]; then
+    # Create tenant in Credo
+    echo "  Creating Platform-admin tenant in Credo multi-tenant agent..."
+    local create_resp
+    create_resp="$(curl -sf --max-time 15 -X POST \
+      -H "Authorization: Bearer ${root_jwt}" \
+      -H "Content-Type: application/json" \
+      -d "{\"config\":{\"label\":\"Platform-admin\"},\"jwt\":[\"Basewallet\"]}" \
+      "${endpoint}/multi-tenancy/create-tenant" 2>/dev/null || true)"
+
+    tenant_id="$(printf '%s' "$create_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tenantId', d.get('id','')))" 2>/dev/null || true)"
+    if [ -z "$tenant_id" ]; then
+      echo "  Error: Failed to create tenant. Response: $create_resp" >&2
+      return 1
+    fi
+    echo "  Tenant created: $tenant_id"
+  else
+    echo "  Tenant already exists: $tenant_id"
+  fi
+
+  # Get tenant JWT via get-token endpoint (fresh — valid for current Credo secretKey)
+  local tenant_jwt
+  tenant_jwt="$(curl -sf --max-time 10 -X POST \
+    -H "Authorization: Bearer ${root_jwt}" \
+    "${endpoint}/multi-tenancy/get-token/${tenant_id}" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)"
+
+  if [ -z "$tenant_jwt" ]; then
+    echo "  Error: Failed to get tenant JWT for tenant ${tenant_id}." >&2
+    return 1
+  fi
+
+  # Encrypt tenant JWT with CryptoJS AES (same as CREDEBL's dataEncryption method)
+  local encrypted_jwt
+  encrypted_jwt="$(docker compose exec -T agent-service node -e "
+const CryptoJS = require('crypto-js');
+const token = '${tenant_jwt}';
+const key = process.env.CRYPTO_PRIVATE_KEY;
+const encrypted = CryptoJS.AES.encrypt(JSON.stringify(token), key).toString();
+process.stdout.write(encrypted);
+" 2>/dev/null)"
+
+  if [ -z "$encrypted_jwt" ]; then
+    echo "  Error: Failed to encrypt tenant JWT." >&2
+    return 1
+  fi
+
+  # Update DB: set tenantId and apiKey
+  docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -v ON_ERROR_STOP=1 -c "
+      UPDATE org_agents oa
+      SET \"tenantId\" = '${tenant_id}',
+          \"apiKey\"   = '${encrypted_jwt}'
+      FROM organisation o
+      WHERE oa.\"orgId\" = o.id
+        AND o.name = 'Platform-admin';" >/dev/null
+
+  echo "  Platform-admin tenant wallet configured (tenantId=${tenant_id})."
+
+  # Restart agent-service so it picks up the new apiKey on next request
+  docker compose restart agent-service >/dev/null
+  echo "  Agent-service restarted."
+}
+
 # =============================================================================
 # PREREQUISITE CHECKS
 # =============================================================================
@@ -870,6 +984,8 @@ ensure_platform_admin_shared_agent
 # Re-apply the Credo patch now that the platform admin agent container is running.
 echo -n "  Patching Credo CredentialEvents (post-agent-spawn): "
 patch_credo_credential_events
+
+ensure_platform_admin_tenant
 
 # Grant 'owner' org role to platform admin so org-scoped endpoints pass the
 # OrgRolesGuard. CREDEBL's guard on GET /orgs/:orgId and POST /orgs/:orgId/agents/wallet
