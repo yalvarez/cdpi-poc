@@ -193,6 +193,26 @@ _Symptom if missing_: W3C schema creation or credential issuance returns `400 "@
 In multi-tenancy mode the root agent's `agent.modules.credentials` is undefined. The bare `getFormatData()` call throws `TypeError: Cannot read properties of undefined`, crashing the event handler. Every subsequent issuance attempt then gets ECONNREFUSED. Fix: wrap in `try { if (agent.modules && agent.modules.credentials) {...} } catch(e) {}` in `/app/build/events/CredentialEvents.js` inside the spawned Credo container.
 _Symptom if missing_: Credential issuance returns `500 "Rpc Exception - connect ECONNREFUSED VPS_IP:8012"`.
 
+### Platform-admin tenant wallet and DID creation (Patch 4 — automated in init-credebl.sh)
+
+**Root cause**: CREDEBL's Credo controller runs in multi-tenancy mode. The platform-admin org has `orgAgentType = DEDICATED` — its `agentEndPoint` points to the shared Credo container. For DEDICATED agents, `agent-service` decrypts `org_agents.apiKey` and uses it directly as the `Authorization` header for every Credo API call. In multi-tenant Credo, a `RestRootAgentWithTenants` JWT cannot perform DID operations — Credo rejects it with `"Basewallet can only manage tenants"`. Only a `RestTenantAgent` JWT (scoped to a specific tenant ID) can write DIDs and issue credentials.
+
+On a fresh CREDEBL deployment, `org_agents.tenantId` is NULL and `org_agents.apiKey` is empty for the Platform-admin org, because `agent-service` provisions the root Credo container but never creates a tenant inside it for Platform-admin itself. Studio's "Create DID" button hits `POST /orgs/{id}/agents/did` → 500 `"Unauthorized"`.
+
+**Fix (automated)**: `ensure_platform_admin_tenant()` in `init-credebl.sh` runs after `ensure_platform_admin_shared_agent` and does the following:
+1. Gets a root JWT: `POST {agentEndPoint}/agent/token` with `Authorization: {AGENT_API_KEY}` → response field is `"token"` (NOT `"access_token"`)
+2. Creates a tenant: `POST {agentEndPoint}/multi-tenancy/create-tenant` with `{"config":{"label":"Platform-admin"}}` — no `jwt` field (it's excess and rejected). Response `"id"` field is the `tenantId`.
+3. Gets a fresh tenant JWT: `POST {agentEndPoint}/multi-tenancy/get-token/{tenantId}` → response field is also `"token"`
+4. Encrypts the tenant JWT: `CryptoJS.AES.encrypt(JSON.stringify(token), CRYPTO_PRIVATE_KEY)` — the inner `JSON.stringify` is required because CREDEBL's `decryptPassword` calls `JSON.parse` on the decrypted bytes
+5. Stores `tenantId` and encrypted JWT in `org_agents` and restarts `agent-service`
+
+**Credo JWT lifetime caveat**: The tenant JWT is signed with a random `secretKey` generated when the Credo container starts and stored in Askar wallet. It has no `exp` claim. If the Credo container is ever restarted, the `secretKey` regenerates and the stored JWT becomes invalid. Recovery: re-run `ensure_platform_admin_tenant` manually (or re-run `init-credebl.sh`). The function is idempotent — it skips tenant creation if `tenantId` already exists in DB, but always refreshes the JWT.
+
+**Symptoms when this is broken**:
+- `POST /orgs/{id}/agents/did` → 500 `"Unauthorized"` (agent-service log: `"Basewallet can only manage tenants"`)
+- `POST /orgs/{id}/agents/did` → 500 `"Invalid Credentials"` (agent-service log: `"Agent api key details: Invalid Credentials"`) — means `apiKey` is empty or corrupt
+- `POST /auth/signin` → 400 `"Invalid Credentials"` — unrelated but common trap: CREDEBL's API expects the password **CryptoJS AES-encrypted** (`CryptoJS.AES.encrypt(JSON.stringify(password), CRYPTO_PRIVATE_KEY)`). Studio encrypts automatically; raw passwords always fail the `/auth/signin` endpoint.
+
 ### Why Studio is built locally (not pulled)
 Studio is a Next.js app with `NEXT_PUBLIC_*` build args that bake the VPS IP, OIDC config, and secrets into the image at build time. There is no pre-built image on any registry. `init-credebl.sh` checks for an existing `credebl-studio` image and skips the ~5-8 minute Next.js build on re-deployments. Answer N to the skip prompt only if the VPS IP or secrets changed.
 
@@ -243,6 +263,7 @@ INJI:    3001 (Inji Web), 5433 (Postgres), 6380 (Redis), 8088 (eSignet),
 - [x] **`credebl-master-table.json`**: Built manually and included at `credebl/config/credebl-master-table.json`. Contains BCovrin Testnet + Indicio Testnet ledger configs and the minimum org_agents_type and client_config seed data. The `seed` service mounts it at `/app/libs/prisma-service/prisma/data/credebl-master-table.json`. Note: if CREDEBL's actual master table has additional fields or tables not reflected here, the seed service may log warnings but should not fail — Prisma's `upsert` pattern skips unknown fields.
 - [x] **Validate CREDEBL stack on real VPS**: Full end-to-end validated on April 17, 2026. All 35 health checks pass on first run of `init-credebl.sh`. Stack uses ~3.6GB RAM. Agent provisioning works reliably with `WALLET_STORAGE_HOST=172.17.0.1`.
 - [x] **Full E2E API flow validated**: April 18, 2026. `api-test.sh` passes all 8 steps: org creation → wallet provisioning (201) → DID did:key (201) → W3C JSON-LD schema (201) → OOB email credential issuance (201) → credential list (200). Three container patches are now automated in `init-credebl.sh` via `apply_container_patches()` — see critical notes below.
+- [x] **Platform-admin tenant wallet setup automated**: April 19, 2026. `ensure_platform_admin_tenant()` added to `init-credebl.sh`. Creates a Credo multi-tenancy tenant for Platform-admin, stores the encrypted `RestTenantAgent` JWT in `org_agents.apiKey`, and sets `tenantId`. Fixes Studio "Create DID" → 500 "Unauthorized" on fresh deployments. See "Platform-admin tenant wallet and DID creation" in Infrastructure design decisions.
 - [ ] **Validate INJI stack on real VPS**: Startup order matters. eSignet must be fully healthy before Certify starts (90s wait). Test the mock OID4VCI flow end-to-end with UIN `5860356276` / OTP `111111`.
 - [ ] **Colombia use case**: Once confirmed, adapt the relevant schema template and update `certify-employment.properties` with the correct credential type and `vct` URL.
 - [ ] **INJI credential configs for education, professional-license, civil-identity**: `certify-employment.properties` exists but the other 3 schema configs for INJI are not yet created. Use `certify-employment.properties` as template.

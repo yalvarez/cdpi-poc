@@ -508,11 +508,13 @@ ensure_platform_admin_tenant() {
   # Normalize endpoint (ensure http:// prefix)
   [[ "$endpoint" =~ ^https?:// ]] || endpoint="http://${endpoint}"
 
-  # Get Credo root JWT
+  # Get Credo root JWT.
+  # Credo's /agent/token returns {"token":"..."} — NOT {"access_token":"..."}.
   local root_jwt
   root_jwt="$(curl -sf --max-time 10 -X POST \
     -H "Authorization: $AGENT_API_KEY" \
-    "${endpoint}/agent/token" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)"
+    "${endpoint}/agent/token" 2>/dev/null \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token', d.get('access_token','')))" 2>/dev/null || true)"
 
   if [ -z "$root_jwt" ]; then
     echo "  Error: Failed to get root JWT from Credo agent at ${endpoint}." >&2
@@ -528,16 +530,18 @@ ensure_platform_admin_tenant() {
       LIMIT 1;" 2>/dev/null | tr -d '\r')"
 
   if [ -z "$tenant_id" ]; then
-    # Create tenant in Credo
+    # Create tenant in Credo.
+    # Payload: only "config" — the "jwt" field is excess and rejected by Credo's validator.
+    # Response: {"id":"<tenantId>","token":"<RestTenantAgent JWT>",...}
     echo "  Creating Platform-admin tenant in Credo multi-tenant agent..."
     local create_resp
     create_resp="$(curl -sf --max-time 15 -X POST \
       -H "Authorization: Bearer ${root_jwt}" \
       -H "Content-Type: application/json" \
-      -d "{\"config\":{\"label\":\"Platform-admin\"},\"jwt\":[\"Basewallet\"]}" \
+      -d '{"config":{"label":"Platform-admin"}}' \
       "${endpoint}/multi-tenancy/create-tenant" 2>/dev/null || true)"
 
-    tenant_id="$(printf '%s' "$create_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tenantId', d.get('id','')))" 2>/dev/null || true)"
+    tenant_id="$(printf '%s' "$create_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || true)"
     if [ -z "$tenant_id" ]; then
       echo "  Error: Failed to create tenant. Response: $create_resp" >&2
       return 1
@@ -547,12 +551,13 @@ ensure_platform_admin_tenant() {
     echo "  Tenant already exists: $tenant_id"
   fi
 
-  # Get tenant JWT via get-token endpoint (fresh — valid for current Credo secretKey)
+  # Get a fresh tenant JWT via get-token (valid for the current Credo secretKey).
+  # Response: {"token":"<RestTenantAgent JWT>"} — NOT {"access_token":"..."}.
   local tenant_jwt
   tenant_jwt="$(curl -sf --max-time 10 -X POST \
     -H "Authorization: Bearer ${root_jwt}" \
     "${endpoint}/multi-tenancy/get-token/${tenant_id}" 2>/dev/null \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)"
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token', d.get('access_token','')))" 2>/dev/null || true)"
 
   if [ -z "$tenant_jwt" ]; then
     echo "  Error: Failed to get tenant JWT for tenant ${tenant_id}." >&2
@@ -587,7 +592,10 @@ process.stdout.write(encrypted);
   echo "  Platform-admin tenant wallet configured (tenantId=${tenant_id})."
 
   # Restart agent-service so it picks up the new apiKey on next request
+  # Restart agent-service so it picks up the refreshed apiKey on the next request.
+  # Give it 10s to reconnect to NATS before the caller proceeds.
   docker compose restart agent-service >/dev/null
+  sleep 10
   echo "  Agent-service restarted."
 }
 
