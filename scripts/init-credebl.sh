@@ -251,8 +251,15 @@ process.stdout.write('patched\n');
 JSEOF
   docker cp "$patch_script" "${credo_container}:/tmp/patch_credo.js"
   rm -f "$patch_script"
-  docker exec --user root "$credo_container" node /tmp/patch_credo.js
-  docker restart "$credo_container" >/dev/null
+  local result
+  result="$(docker exec --user root "$credo_container" node /tmp/patch_credo.js)"
+  printf '%s\n' "$result"
+  # Only restart Credo when the patch was actually applied — a restart regenerates
+  # Credo's random secretKey, invalidating the stored tenant JWT. Skipping the
+  # restart when already patched avoids a pointless JWT refresh cycle on re-runs.
+  if [ "$result" = "patched" ]; then
+    docker restart "$credo_container" >/dev/null
+  fi
 }
 
 patch_issuance_schema_url() {
