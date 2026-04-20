@@ -319,6 +319,34 @@ JSEOF
   docker exec --user root credebl-issuance node /tmp/patch_issuance_ctx.js
 }
 
+patch_agent_service_create_tenant() {
+  # agent-service._createTenantWallet sends the Platform-admin's tenant JWT
+  # (RestTenantAgent) as the Authorization header when calling Credo's
+  # /multi-tenancy/create-tenant. Credo requires a root JWT (RestRootAgentWithTenants)
+  # for this operation — the tenant JWT is silently rejected (empty response body),
+  # so walletResponseDetails.id is undefined and org_agents stays at
+  # agentSpinUpStatus=1 with empty tenantId/apiKey. Every new org's shared wallet
+  # creation fails with this bug.
+  # Fix: exchange for root JWT via /agent/token before calling create-tenant.
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_agent_ct_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/agent-service/main.js';
+let content = fs.readFileSync(path, 'utf8');
+if (content.includes('PATCH: create-tenant needs root JWT')) { process.stdout.write('already patched\n'); process.exit(0); }
+const target = 'const tenantDetails = await this.commonService.httpPost(`${endpoint}${common_constant_1.CommonConstants.URL_SHAGENT_CREATE_TENANT}`, createTenantOptions, { headers: { authorization: agentApiKey } });\n        return tenantDetails;\n    }\n    async handleCreateDid';
+if (!content.includes(target)) { process.stderr.write('ERROR: patch target not found in agent-service/main.js\n'); process.exit(1); }
+const replacement = 'const rootTokenResp = await this.commonService.httpPost(endpoint + "/agent/token", {}, { headers: { authorization: process.env.AGENT_API_KEY } }); // PATCH: create-tenant needs root JWT\n        const rootJwt = "Bearer " + ((rootTokenResp && rootTokenResp.token) || (rootTokenResp && rootTokenResp.access_token) || "");\n        const tenantDetails = await this.commonService.httpPost(`${endpoint}${common_constant_1.CommonConstants.URL_SHAGENT_CREATE_TENANT}`, createTenantOptions, { headers: { authorization: rootJwt } });\n        return tenantDetails;\n    }\n    async handleCreateDid';
+content = content.replace(target, replacement);
+fs.writeFileSync(path, content);
+process.stdout.write('patched\n');
+JSEOF
+  docker cp "$patch_script" credebl-agent-service:/tmp/patch_agent_ct.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-agent-service node /tmp/patch_agent_ct.js
+}
+
 apply_container_patches() {
   echo
   echo "Applying CREDEBL container patches..."
@@ -335,6 +363,10 @@ apply_container_patches() {
   echo -n "  Issuance service @context URL normalization: "
   patch_issuance_context_urls
   docker compose restart issuance >/dev/null
+
+  echo -n "  Agent-service shared wallet create-tenant (root JWT): "
+  patch_agent_service_create_tenant
+  docker compose restart agent-service >/dev/null
 
   echo "  Waiting for restarted containers to be ready..."
   local deadline=$(( $(date +%s) + 60 ))

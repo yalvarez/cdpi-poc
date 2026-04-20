@@ -177,7 +177,7 @@ CREDEBL's `agent-provisioning` spawns the Credo controller container via the Doc
 
 This is hardcoded in `init-credebl.sh` and the `docker-compose.yml` fallback default. Do not change to the VPS hostname/IP.
 
-### Five required CREDEBL container patches (automated in init-credebl.sh)
+### Six required CREDEBL container patches (automated in init-credebl.sh)
 
 These patches fix bugs in the published CREDEBL Docker images. `init-credebl.sh` applies them automatically via `apply_container_patches()` after every `docker compose up`. All are idempotent.
 
@@ -196,6 +196,10 @@ _Symptom if missing_: Credential issuance returns `500 "Rpc Exception - connect 
 **Patch 4 — Issuance service schema URL deduplication (getW3CSchemaAttributes)**
 Studio's URL builder prepends `http://` to the `schemaLedgerId` even when it already starts with `http://`, producing `http://http://schema-file-server:4000/schemas/...`. CREDEBL's `getW3CSchemaAttributes` uses this URL to fetch the schema JSON — the double-prefixed URL 404s. Fix: insert a `while (schemaUrl.indexOf("://http") > 0)` stripping loop at the start of `getW3CSchemaAttributes` in `/app/dist/apps/issuance/main.js`. Uses string operations only — no regex literals (regex literals in string-concatenated bundles lose backslashes and produce `SyntaxError`).
 _Symptom if missing_: Credential issuance returns `500 "Something went wrong!"` with agent-service log showing a 404 on the schema URL.
+
+**Patch 6 — Agent-service shared wallet creation uses root JWT for create-tenant**
+`_createTenantWallet` in agent-service sends Platform-admin's tenant JWT (RestTenantAgent) as `Authorization` when calling Credo's `/multi-tenancy/create-tenant`. Credo requires a root JWT (RestRootAgentWithTenants) for this — the tenant JWT is silently rejected (empty response), so `walletResponseDetails.id` is undefined, the code throws NotFoundException, and `org_agents` stays at `agentSpinUpStatus=1` with empty `tenantId`/`apiKey`. Every new org's shared wallet creation fails. Fix: call `POST {endpoint}/agent/token` with `AGENT_API_KEY` first to get a root JWT, then call `create-tenant` with `Authorization: Bearer {root_jwt}`. Patch string guard: `PATCH: create-tenant needs root JWT`.
+_Symptom if missing_: Studio "Create Shared Wallet" appears to succeed (no error shown) but `org_agents.agentSpinUpStatus` stays at 1 with empty `tenantId`. All subsequent operations (Create DID, issue credential) return 404 `"API key is not found"`.
 
 **Patch 5 — Issuance service @context triple-prefix (outOfBandCredentialOffer)**
 When Studio builds the OOB JSON-LD credential offer, it prepends `http://` to the schema URL again — now the `@context` array sent to Credo contains `"http://http://http://schema-file-server:4000/schemas/..."`. Credo rejects this with 400. Fix: insert a normalization loop after `this.logger.debug('Validated/Updated Issuance dates credential offer')` in `outOfBandCredentialOffer` that strips duplicate `://http` prefixes from every URL in `offer.credential['@context']`. Guard string: `ctx.map(function(url)`.
@@ -224,7 +228,7 @@ On a fresh CREDEBL deployment, `org_agents.tenantId` is NULL and `org_agents.api
 - `POST /orgs/{id}/agents/did` → 404 `"API key is not found"` — means `org_agents.tenantId` is NULL or the tenant JWT is stale (Credo was restarted). Same fix: create/refresh tenant JWT.
 - `POST /auth/signin` → 400 `"Invalid Credentials"` — unrelated but common trap: CREDEBL's API expects the password **CryptoJS AES-encrypted** (`CryptoJS.AES.encrypt(JSON.stringify(password), CRYPTO_PRIVATE_KEY)`). Studio encrypts automatically; raw passwords always fail the `/auth/signin` endpoint.
 
-**Recovery for any org (not just Platform-admin)** whose wallet provisioning failed (`agentSpinUpStatus=1`, empty `tenantId`/`apiKey`): this happens when Credo was restarting while Studio tried to create the shared wallet (NATS response was lost). Manual fix:
+**Recovery for any org (not just Platform-admin)** whose wallet provisioning failed (`agentSpinUpStatus=1`, empty `tenantId`/`apiKey`): on fresh deployments this was caused by a bug in agent-service (Patch 6, now automated). On existing orgs that were created before the patch, or if Credo was restarting during wallet creation, manual fix:
 1. `POST {agentEndPoint}/agent/token` → get root JWT
 2. `POST {agentEndPoint}/multi-tenancy/create-tenant` with `{"config":{"label":"<org name>"}}` → get tenantId
 3. `POST {agentEndPoint}/multi-tenancy/get-token/{tenantId}` → get tenant JWT
