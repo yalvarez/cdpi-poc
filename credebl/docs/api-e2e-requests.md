@@ -5,6 +5,9 @@ It is aligned with the current Studio API wrappers and payload builders in this 
 
 ## What This Covers
 
+Two paths are documented here:
+
+**Path A — W3C JSON-LD (DIDComm OOB)** — validated Apr 18, 2026  
 1. Encrypt password locally (OpenSSL-compatible AES)
 2. Sign in and obtain Bearer token
 3. Create organization
@@ -12,6 +15,16 @@ It is aligned with the current Studio API wrappers and payload builders in this 
 5. Create DID (`did:key`)
 6. Create W3C schema
 7. Issue credential by email (`credentialType=jsonld`)
+
+**Path B — SD-JWT VC (OID4VCI + OID4VP)** — see section below  
+Steps 1-5 are identical. Steps 6-7 differ:
+6. Create SD-JWT VC schema (`schemaType: no_ledger`)
+7. Issue credential by email (`credentialType=sdjwt`) — produces `openid-credential-offer://` URL
+8. Create OID4VP proof request (`POST /orgs/{id}/proofs/oob`)
+
+> Full automated scripts:
+> - `bash credebl/docs/api-test.sh` — Path A (W3C JSON-LD)
+> - `bash credebl/docs/api-test-oid4vc.sh` — Path B (SD-JWT OID4VCI)
 
 ## Prerequisites
 
@@ -187,6 +200,127 @@ curl -s -X POST "$BASE_URL/orgs/$ORG_ID/credentials/oob/email?credentialType=jso
   -d "$ISSUE_PAYLOAD" | jq .
 ```
 
+---
+
+## Path B — SD-JWT VC (OID4VCI)
+
+Steps 1-5 are identical to Path A. Only the schema creation and issuance differ.
+
+### 6B) Create SD-JWT VC Schema
+
+Use `schemaType: "no_ledger"` — same API, same endpoint, no blockchain required.
+
+```bash
+SDJWT_SCHEMA_NAME="EmploymentOID4VC"
+
+SDJWT_SCHEMA_PAYLOAD=$(jq -n --arg orgId "$ORG_ID" --arg schemaName "$SDJWT_SCHEMA_NAME" '{
+  type:"json",
+  schemaPayload:{
+    schemaName:$schemaName,
+    schemaType:"no_ledger",
+    attributes:[
+      {attributeName:"given_name",          schemaDataType:"string", displayName:"Given Name",     isRequired:true},
+      {attributeName:"family_name",         schemaDataType:"string", displayName:"Family Name",    isRequired:true},
+      {attributeName:"document_number",     schemaDataType:"string", displayName:"Document Number",isRequired:false},
+      {attributeName:"employer_name",       schemaDataType:"string", displayName:"Employer Name",  isRequired:true},
+      {attributeName:"employment_status",   schemaDataType:"string", displayName:"Status",         isRequired:true},
+      {attributeName:"position_title",      schemaDataType:"string", displayName:"Position",       isRequired:true},
+      {attributeName:"employment_start_date",schemaDataType:"string",displayName:"Start Date",     isRequired:true}
+    ],
+    description:$schemaName,
+    orgId:$orgId
+  }
+}')
+
+SDJWT_SCHEMA_RESPONSE=$(curl -s -X POST "$BASE_URL/orgs/$ORG_ID/schemas" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$SDJWT_SCHEMA_PAYLOAD")
+
+echo "$SDJWT_SCHEMA_RESPONSE" | jq .
+SDJWT_SCHEMA_ID=$(echo "$SDJWT_SCHEMA_RESPONSE" | jq -r '.data.schemaLedgerId // .data.schemaId // .data.id')
+echo "SD-JWT Schema ID: $SDJWT_SCHEMA_ID"
+```
+
+### 7B) Issue SD-JWT VC via OID4VCI OOB Email
+
+Key differences from Path A:
+- `?credentialType=sdjwt` instead of `jsonld`
+- `attributes` flat array instead of W3C `@context`/`credential` wrapper
+- `credentialDefinitionId` set to the schema ID (no ledger credential definition needed)
+- Response contains `openid-credential-offer://` URL (not a MinIO URL)
+
+```bash
+SDJWT_ISSUE_PAYLOAD=$(jq -n \
+  --arg email   "$EMAIL_TO" \
+  --arg schemaId "$SDJWT_SCHEMA_ID" \
+  '{
+    credentialOffer:[{
+      emailId:$email,
+      attributes:[
+        {name:"given_name",          value:"María José"},
+        {name:"family_name",         value:"García Pérez"},
+        {name:"document_number",     value:"001-1985031-4"},
+        {name:"employer_name",       value:"Ministerio de Trabajo"},
+        {name:"employment_status",   value:"active"},
+        {name:"position_title",      value:"Técnico en Sistemas"},
+        {name:"employment_start_date",value:"2018-06-01"}
+      ]
+    }],
+    credentialDefinitionId:$schemaId,
+    isReuseConnection:true
+  }')
+
+curl -s -X POST "$BASE_URL/orgs/$ORG_ID/credentials/oob/email?credentialType=sdjwt" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$SDJWT_ISSUE_PAYLOAD" | jq .
+```
+
+**Expected response** (201):
+```json
+{
+  "statusCode": 201,
+  "message": "Credential offer sent successfully",
+  "data": {
+    "id": "<issuance-uuid>",
+    "credentialOffer": "openid-credential-offer://?credential_offer_uri=http://VPS:5000/..."
+  }
+}
+```
+
+### 8B) Create OID4VP Proof Request
+
+```bash
+PROOF_PAYLOAD=$(jq -n \
+  --arg schemaId "$SDJWT_SCHEMA_ID" \
+  '{
+    comment:"Employment verification",
+    proofReqPayload:{
+      name:"employment-check",
+      version:"1.0",
+      requested_attributes:{
+        attr_given_name:{name:"given_name",        restrictions:[{schema_id:$schemaId}]},
+        attr_employer:  {name:"employer_name",     restrictions:[{schema_id:$schemaId}]},
+        attr_status:    {name:"employment_status", restrictions:[{schema_id:$schemaId}]}
+      },
+      requested_predicates:{}
+    }
+  }')
+
+PROOF_RESPONSE=$(curl -s -X POST "$BASE_URL/orgs/$ORG_ID/proofs/oob" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$PROOF_PAYLOAD")
+
+echo "$PROOF_RESPONSE" | jq .
+PROOF_ID=$(echo "$PROOF_RESPONSE" | jq -r '.data.id')
+PROOF_URL=$(echo "$PROOF_RESPONSE" | jq -r '.data.proofUrl // .data.invitationUrl')
+echo "Proof URL (OID4VP): $PROOF_URL"
+```
+
+---
+
 ## One-command execution
 
 A ready-to-run script is included at:
@@ -197,6 +331,13 @@ Run:
 
 ```bash
 ADMIN_PASSWORD='changeme' bash scripts/credebl-api-e2e.sh YOUR_VPS_IP holder@example.com
+```
+
+For the OID4VC path:
+
+```bash
+ADMIN_PASSWORD='changeme' EMAIL_TO='holder@example.com' \
+  bash credebl/docs/api-test-oid4vc.sh
 ```
 
 ## Postman Collection

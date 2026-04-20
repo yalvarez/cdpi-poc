@@ -6,6 +6,7 @@
 **Prerequisites**: Stack healthy (`bash scripts/health-check.sh`)
 
 > API-first path (no Studio clicks): see `credebl/docs/api-e2e-requests.md` and run `scripts/credebl-api-e2e.sh`.
+> OID4VC (SD-JWT) path: see `credebl/docs/api-test-oid4vc.sh` — validates OID4VCI issuance + OID4VP verification end-to-end.
 
 ---
 
@@ -118,93 +119,136 @@ echo "Credential Definition ID: $CRED_DEF_ID"
 
 ---
 
-## Flow 4 — Issue a credential (OID4VCI)
+## Flow 4A — Issue an SD-JWT VC (OID4VCI — recommended for OID4VC protocol)
+
+This is the native OID4VCI path. The Credo agent produces an `openid-credential-offer://` URL that OID4VCI-compliant wallets (Inji, MATTR, etc.) scan to receive an SD-JWT VC.
+
+**Prerequisites**: org with `did:key` DID and an SD-JWT schema (see Flows 1-3 above, using `schemaType: "no_ledger"`).
 
 ```bash
-# Issue credential — returns an offer URL the holder opens in their wallet
-OFFER=$(curl -s -X POST "$BASE/issuance/oob/create-offer" \
+# Issue SD-JWT VC via OOB email — credentialType=sdjwt triggers the OID4VCI path
+ISSUE=$(curl -s -X POST "$BASE/orgs/$ORG_ID/credentials/oob/email?credentialType=sdjwt" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "orgId": "'"$ORG_ID"'",
-    "credentialDefinitionId": "'"$CRED_DEF_ID"'",
-    "comment": "PoC Employment Certificate",
-    "attributes": [
-      { "name": "given_name",           "value": "María José" },
-      { "name": "family_name",          "value": "García Pérez" },
-      { "name": "birthdate",            "value": "1985-03-14" },
-      { "name": "document_number",      "value": "001-1985031-4" },
-      { "name": "employer_name",        "value": "Ministerio de Educación" },
-      { "name": "employer_id",          "value": "4-01-50001-8" },
-      { "name": "employment_status",    "value": "active" },
-      { "name": "employment_type",      "value": "permanent" },
-      { "name": "position_title",       "value": "Técnico en Sistemas" },
-      { "name": "department",           "value": "Dirección General de TI" },
-      { "name": "employment_start_date","value": "2018-06-01" },
-      { "name": "gross_salary",         "value": "45000" },
-      { "name": "salary_currency",      "value": "DOP" },
-      { "name": "issuer_name",          "value": "Ministerio de Trabajo" },
-      { "name": "certificate_number",   "value": "CERT-2024-0001234" }
-    ]
+    "credentialOffer": [
+      {
+        "emailId": "holder@example.com",
+        "attributes": [
+          { "name": "given_name",            "value": "María José" },
+          { "name": "family_name",           "value": "García Pérez" },
+          { "name": "document_number",       "value": "001-1985031-4" },
+          { "name": "employer_name",         "value": "Ministerio de Trabajo" },
+          { "name": "employment_status",     "value": "active" },
+          { "name": "position_title",        "value": "Técnico en Sistemas" },
+          { "name": "employment_start_date", "value": "2018-06-01" }
+        ]
+      }
+    ],
+    "credentialDefinitionId": "'"$SCHEMA_ID"'",
+    "isReuseConnection": true
   }' | jq .)
 
-OFFER_URL=$(echo $OFFER | jq -r '.offerUrl // .invitationUrl')
-ISSUANCE_ID=$(echo $OFFER | jq -r '.id')
+OFFER_URL=$(echo $ISSUE | jq -r '.data.credentialOffer // .data.offerUrl // .data.invitationUrl')
+ISSUANCE_ID=$(echo $ISSUE | jq -r '.data.id')
 
 echo "Issuance ID: $ISSUANCE_ID"
-echo ""
-echo "Offer URL (open in wallet or encode as QR):"
+echo "OID4VCI Offer URL (open in wallet or encode as QR):"
 echo "$OFFER_URL"
 ```
 
-**Expected**: The holder opens this URL in their wallet app (Inji, etc.) to accept the credential.
+**Offer URL format**: `openid-credential-offer://?credential_offer_uri=http://VPS:5000/...`  
+**Holder action**: open the URL in Inji or any OID4VCI-compatible wallet to accept the SD-JWT VC.
+
+> **Run the full automated test**: `bash credebl/docs/api-test-oid4vc.sh`
 
 ---
 
-## Flow 5 — Verify a credential (OID4VP)
+## Flow 4B — Issue a W3C JSON-LD VC (validated, DIDComm OOB path)
+
+This is the alternative path using W3C JSON-LD credentials delivered via DIDComm OOB.
+The offer URL format is `https://VPS:9000/credebl-bucket/default/{uuid}` (stored in MinIO).
 
 ```bash
-# Create a verification request — returns a proof request URL
-PROOF=$(curl -s -X POST "$BASE/verification/send-verification-request" \
+# Issue W3C JSON-LD VC via OOB email — credentialType=jsonld
+ISSUE=$(curl -s -X POST "$BASE/orgs/$ORG_ID/credentials/oob/email?credentialType=jsonld" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "orgId": "'"$ORG_ID"'",
-    "comment": "Employment verification for PoC demo",
-    "requestedAttributes": [
+    "credentialOffer": [
       {
-        "attributeName": "given_name",
-        "schemaId": "'"$SCHEMA_ID"'",
-        "credDefId": "'"$CRED_DEF_ID"'",
-        "isRevoked": false
-      },
-      {
-        "attributeName": "family_name",
-        "schemaId": "'"$SCHEMA_ID"'",
-        "credDefId": "'"$CRED_DEF_ID"'",
-        "isRevoked": false
-      },
-      {
-        "attributeName": "employer_name",
-        "schemaId": "'"$SCHEMA_ID"'",
-        "credDefId": "'"$CRED_DEF_ID"'",
-        "isRevoked": false
-      },
-      {
-        "attributeName": "employment_status",
-        "schemaId": "'"$SCHEMA_ID"'",
-        "credDefId": "'"$CRED_DEF_ID"'",
-        "isRevoked": false
+        "emailId": "holder@example.com",
+        "credential": {
+          "@context": [
+            "https://www.w3.org/2018/credentials/v1",
+            "'"$SCHEMA_CONTEXT_URL"'"
+          ],
+          "type": ["VerifiableCredential", "'"$SCHEMA_NAME"'"],
+          "issuer": { "id": "'"$ORG_DID"'" },
+          "issuanceDate": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+          "credentialSubject": {
+            "given_name": "María José",
+            "family_name": "García Pérez",
+            "employer_name": "Ministerio de Trabajo",
+            "employment_status": "active"
+          }
+        },
+        "options": {
+          "proofType": "Ed25519Signature2018",
+          "proofPurpose": "assertionMethod"
+        }
       }
-    ]
+    ],
+    "protocolVersion": "v2",
+    "isReuseConnection": true,
+    "credentialType": "jsonld"
   }' | jq .)
 
-PROOF_URL=$(echo $PROOF | jq -r '.proofUrl // .invitationUrl')
-PROOF_ID=$(echo $PROOF | jq -r '.id')
+echo "Offer URL (DIDComm OOB):"
+echo $ISSUE | jq -r '.data.invitationUrl // .data.offerUrl'
+```
+
+> **Run the full validated test**: `bash credebl/docs/api-test.sh` (validated Apr 18, 2026)
+
+---
+
+## Flow 5 — Create OID4VP proof request
+
+The verifier creates a proof request URL. The holder scans it in their wallet and presents the credential.
+
+```bash
+# Create OID4VP OOB proof request
+PROOF=$(curl -s -X POST "$BASE/orgs/$ORG_ID/proofs/oob" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "comment": "Employment verification — PoC demo",
+    "proofReqPayload": {
+      "name": "employment-check",
+      "version": "1.0",
+      "requested_attributes": {
+        "attr_given_name": {
+          "name": "given_name",
+          "restrictions": [{ "schema_id": "'"$SCHEMA_ID"'" }]
+        },
+        "attr_employer": {
+          "name": "employer_name",
+          "restrictions": [{ "schema_id": "'"$SCHEMA_ID"'" }]
+        },
+        "attr_status": {
+          "name": "employment_status",
+          "restrictions": [{ "schema_id": "'"$SCHEMA_ID"'" }]
+        }
+      },
+      "requested_predicates": {}
+    }
+  }' | jq .)
+
+PROOF_URL=$(echo $PROOF | jq -r '.data.proofUrl // .data.invitationUrl')
+PROOF_ID=$(echo $PROOF | jq -r '.data.id')
 
 echo "Proof ID: $PROOF_ID"
-echo ""
-echo "Proof URL (show as QR for wallet to scan):"
+echo "OID4VP Proof Request URL (show as QR for wallet to scan):"
 echo "$PROOF_URL"
 ```
 
@@ -215,16 +259,16 @@ echo "$PROOF_URL"
 ```bash
 # Poll until done or abandoned (run after holder presents the credential)
 while true; do
-  RESULT=$(curl -s "$BASE/verification/proofs/$PROOF_ID" \
+  RESULT=$(curl -s "$BASE/orgs/$ORG_ID/proofs/$PROOF_ID" \
     -H "Authorization: Bearer $TOKEN" | jq .)
 
-  STATE=$(echo $RESULT | jq -r '.state')
+  STATE=$(echo $RESULT | jq -r '.data.state // .state')
   echo "State: $STATE"
 
-  if [ "$STATE" = "done" ]; then
+  if [ "$STATE" = "done" ] || [ "$STATE" = "verified" ]; then
     echo ""
     echo "Verification result:"
-    echo $RESULT | jq '{isVerified: .isVerified, attributes: .requestedAttributes}'
+    echo $RESULT | jq '{isVerified: .data.isVerified, state: .data.state}'
     break
   fi
 
@@ -239,9 +283,26 @@ done
 
 ---
 
-## Flow 7 — Full automated test (Day 4 smoke test)
+## Flow 7 — Full automated tests (Day 4 smoke tests)
 
-Run this script to validate issuance + verification work end-to-end using CREDEBL's test tooling:
+Two scripts cover the full E2E:
+
+| Script | Protocol | Format | Status |
+|--------|----------|--------|--------|
+| `credebl/docs/api-test.sh` | DIDComm OOB | W3C JSON-LD | ✓ Validated Apr 18, 2026 |
+| `credebl/docs/api-test-oid4vc.sh` | OID4VCI + OID4VP | SD-JWT VC | Run on Day 4 |
+
+```bash
+# W3C JSON-LD (DIDComm OOB) — already validated
+ADMIN_PASSWORD='yourpassword' EMAIL_TO='holder@example.com' \
+  bash credebl/docs/api-test.sh
+
+# SD-JWT VC (OID4VCI + OID4VP)
+ADMIN_PASSWORD='yourpassword' EMAIL_TO='holder@example.com' \
+  bash credebl/docs/api-test-oid4vc.sh
+```
+
+Quick API health smoke test:
 
 ```bash
 #!/usr/bin/env bash

@@ -1,9 +1,9 @@
-﻿{
+{
   "info": {
     "_postman_id": "5dd8f1d0-6e56-4d0a-93ef-4f53fd6f3d9f",
     "name": "CREDEBL API E2E (CDPI PoC)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "End-to-end official API flow: local encrypt -> /v1/auth/signin -> org -> wallet -> did -> schema -> email issuance"
+    "description": "End-to-end API flows for CREDEBL.\n\nFolder A (01-08): W3C JSON-LD issuance via DIDComm OOB — validated Apr 18 2026.\nFolder B (09-13): OID4VCI SD-JWT issuance + OID4VP verification."
   },
   "event": [
     {
@@ -20,122 +20,306 @@
   ],
   "item": [
     {
-      "name": "01 Sign In (/v1) with Local Encryption",
-      "event": [
+      "name": "── Folder A: W3C JSON-LD (DIDComm OOB) — validated ──",
+      "item": [
         {
-          "listen": "prerequest",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const plain = pm.environment.get('admin_password') || 'changeme';",
-              "const key = pm.environment.get('crypto_private_key') || 'cdpi-poc-crypto-key-change-me';",
-              "const encrypted = CryptoJS.AES.encrypt(JSON.stringify(plain), key).toString();",
-              "pm.environment.set('enc_password', encrypted);"
-            ]
+          "name": "01 Sign In (/v1) with Local Encryption",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const plain = pm.environment.get('admin_password') || 'changeme';",
+                  "const key = pm.environment.get('crypto_private_key') || 'cdpi-poc-crypto-key-change-me';",
+                  "const encrypted = CryptoJS.AES.encrypt(JSON.stringify(plain), key).toString();",
+                  "pm.environment.set('enc_password', encrypted);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200/201', function(){pm.expect([200,201]).to.include(pm.response.code);});",
+                  "const j = pm.response.json();",
+                  "const t = j?.data?.access_token || '';",
+                  "pm.environment.set('access_token', t);",
+                  "pm.test('access_token captured', function(){pm.expect(t).to.not.equal('');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{enc_password}}\"\n}" },
+            "url": { "raw": "{{base_url}}/v1/auth/signin", "host": ["{{base_url}}"], "path": ["v1", "auth", "signin"] }
+          },
+          "response": []
+        },
+        {
+          "name": "02 Create Organization",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{org_name}}\",\n  \"description\": \"Organization created from Postman collection\",\n  \"website\": \"https://cdpi-poc.local\",\n  \"countryId\": null,\n  \"stateId\": null,\n  \"cityId\": null,\n  \"logo\": \"\"\n}" },
+            "url": { "raw": "{{base_url}}/orgs", "host": ["{{base_url}}"], "path": ["orgs"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200/201', function(){pm.expect([200,201]).to.include(pm.response.code);});", "const j = pm.response.json();", "const id = j?.data?.id || j?.id || '';", "pm.environment.set('org_id', id);", "pm.test('org_id captured', function(){pm.expect(id).to.not.equal('');});"] } }]
+        },
+        {
+          "name": "03 Spin Up Shared Wallet",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"label\": \"ApiFlowWallet\",\n  \"clientSocketId\": \"\"\n}" },
+            "url": { "raw": "{{base_url}}/orgs/{{org_id}}/agents/wallet", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "agents", "wallet"] }
           }
         },
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('Status is 200/201', function(){pm.expect([200,201]).to.include(pm.response.code);});",
-              "const j = pm.response.json();",
-              "const t = j?.data?.access_token || '';",
-              "pm.environment.set('access_token', t);",
-              "pm.test('access_token captured', function(){pm.expect(t).to.not.equal('');});"
-            ]
+          "name": "04 Create DID (did:key)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"seed\": \"\",\n  \"keyType\": \"ed25519\",\n  \"method\": \"key\",\n  \"ledger\": \"\",\n  \"privatekey\": \"\",\n  \"network\": \"\",\n  \"domain\": \"\",\n  \"role\": \"\",\n  \"endorserDid\": \"\",\n  \"clientSocketId\": \"\",\n  \"isPrimaryDid\": true\n}" },
+            "url": { "raw": "{{base_url}}/orgs/{{org_id}}/agents/did", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "agents", "did"] }
+          }
+        },
+        {
+          "name": "05 Get Organization (capture orgDid)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/orgs/{{org_id}}", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200', function(){pm.response.to.have.status(200);});", "const j = pm.response.json();", "const did = j?.data?.org_agents?.[0]?.orgDid || '';", "pm.environment.set('org_did', did);", "pm.test('org_did captured', function(){pm.expect(did).to.not.equal('');});", "pm.environment.set('schema_type_value', did.startsWith('did:polygon:') ? 'polygon' : 'no_ledger');"] } }]
+        },
+        {
+          "name": "06 Create W3C Schema",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"json\",\n  \"schemaPayload\": {\n    \"schemaName\": \"{{schema_name}}\",\n    \"schemaType\": \"{{schema_type_value}}\",\n    \"attributes\": [\n      { \"attributeName\": \"firstName\", \"schemaDataType\": \"string\", \"displayName\": \"First Name\", \"isRequired\": true },\n      { \"attributeName\": \"lastName\", \"schemaDataType\": \"string\", \"displayName\": \"Last Name\", \"isRequired\": true },\n      { \"attributeName\": \"employeeId\", \"schemaDataType\": \"string\", \"displayName\": \"Employee ID\", \"isRequired\": true }\n    ],\n    \"description\": \"{{schema_name}}\",\n    \"orgId\": \"{{org_id}}\"\n  }\n}" },
+            "url": { "raw": "{{base_url}}/orgs/{{org_id}}/schemas", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "schemas"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const j = pm.response.json();", "const sid = j?.data?.schemaLedgerId || j?.data?.schemaId || j?.data?.id || '';", "pm.environment.set('schema_id_raw', sid);", "pm.test('schema_id_raw captured', function(){pm.expect(sid).to.not.equal('');});"] } }]
+        },
+        {
+          "name": "07 Issue Credential Email (jsonld)",
+          "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const baseRaw = pm.environment.get('schema_file_server_url') || 'http://schema-file-server:4000/schemas/';", "const idRaw = (pm.environment.get('schema_id_raw') || '').trim();", "let base = baseRaw.trim().replace(/\\/+$/, '');", "if (!/\\/schemas$/i.test(base)) base = base + '/schemas';", "let context2 = '';", "if (/^https?:\\/\\//i.test(idRaw)) { context2 = idRaw; }", "else if (/^\\/schemas\\//.test(idRaw)) { const origin = base.replace(/\\/schemas$/i, ''); context2 = origin + idRaw; }", "else if (/^[^\\s]+:\\d+\\/schemas\\//.test(idRaw)) { context2 = 'http://' + idRaw; }", "else { context2 = base + '/' + encodeURIComponent(idRaw); }", "pm.environment.set('schema_context_url', context2);", "if (!pm.environment.get('employee_id')) pm.environment.set('employee_id', 'EMP-' + Date.now());"] } }],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"credentialOffer\": [\n    {\n      \"emailId\": \"{{email_to}}\",\n      \"credential\": {\n        \"@context\": [\n          \"https://www.w3.org/2018/credentials/v1\",\n          \"{{schema_context_url}}\"\n        ],\n        \"type\": [\n          \"VerifiableCredential\",\n          \"{{schema_name}}\"\n        ],\n        \"issuer\": {\n          \"id\": \"{{org_did}}\"\n        },\n        \"issuanceDate\": \"{{$isoTimestamp}}\",\n        \"credentialSubject\": {\n          \"firstName\": \"Maria\",\n          \"lastName\": \"Garcia\",\n          \"employeeId\": \"{{employee_id}}\"\n        }\n      },\n      \"options\": {\n        \"proofType\": \"Ed25519Signature2018\",\n        \"proofPurpose\": \"assertionMethod\"\n      }\n    }\n  ],\n  \"protocolVersion\": \"v2\",\n  \"isReuseConnection\": true,\n  \"credentialType\": \"jsonld\"\n}" },
+            "url": { "raw": "{{base_url}}/orgs/{{org_id}}/credentials/oob/email?credentialType=jsonld", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "credentials", "oob", "email"], "query": [{ "key": "credentialType", "value": "jsonld" }] }
+          }
+        },
+        {
+          "name": "08 List Issued Credentials",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/orgs/{{org_id}}/credentials?pageSize=10&pageNumber=1&search=&sortBy=desc&sortField=createdAt",
+              "host": ["{{base_url}}"],
+              "path": ["orgs", "{{org_id}}", "credentials"],
+              "query": [
+                { "key": "pageSize", "value": "10" },
+                { "key": "pageNumber", "value": "1" },
+                { "key": "search", "value": "" },
+                { "key": "sortBy", "value": "desc" },
+                { "key": "sortField", "value": "createdAt" }
+              ]
+            }
           }
         }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{enc_password}}\"\n}" },
-        "url": { "raw": "{{base_url}}/v1/auth/signin", "host": ["{{base_url}}"], "path": ["v1", "auth", "signin"] }
-      },
-      "response": []
+      ]
     },
     {
-      "name": "02 Create Organization",
-      "request": {
-        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"name\": \"{{org_name}}\",\n  \"description\": \"Organization created from Postman collection\",\n  \"website\": \"https://cdpi-poc.local\",\n  \"countryId\": null,\n  \"stateId\": null,\n  \"cityId\": null,\n  \"logo\": \"\"\n}" },
-        "url": { "raw": "{{base_url}}/orgs", "host": ["{{base_url}}"], "path": ["orgs"] }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200/201', function(){pm.expect([200,201]).to.include(pm.response.code);});", "const j = pm.response.json();", "const id = j?.data?.id || j?.id || '';", "pm.environment.set('org_id', id);", "pm.test('org_id captured', function(){pm.expect(id).to.not.equal('');});"] } }]
-    },
-    {
-      "name": "03 Spin Up Shared Wallet",
-      "request": {
-        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"label\": \"ApiFlowWallet\",\n  \"clientSocketId\": \"\"\n}" },
-        "url": { "raw": "{{base_url}}/orgs/{{org_id}}/agents/wallet", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "agents", "wallet"] }
-      }
-    },
-    {
-      "name": "04 Create DID (did:key)",
-      "request": {
-        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"seed\": \"\",\n  \"keyType\": \"ed25519\",\n  \"method\": \"key\",\n  \"ledger\": \"\",\n  \"privatekey\": \"\",\n  \"network\": \"\",\n  \"domain\": \"\",\n  \"role\": \"\",\n  \"endorserDid\": \"\",\n  \"clientSocketId\": \"\",\n  \"isPrimaryDid\": true\n}" },
-        "url": { "raw": "{{base_url}}/orgs/{{org_id}}/agents/did", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "agents", "did"] }
-      }
-    },
-    {
-      "name": "05 Get Organization (capture orgDid)",
-      "request": {
-        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
-        "method": "GET",
-        "url": { "raw": "{{base_url}}/orgs/{{org_id}}", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}"] }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status is 200', function(){pm.response.to.have.status(200);});", "const j = pm.response.json();", "const did = j?.data?.org_agents?.[0]?.orgDid || '';", "pm.environment.set('org_did', did);", "pm.test('org_did captured', function(){pm.expect(did).to.not.equal('');});", "pm.environment.set('schema_type_value', did.startsWith('did:polygon:') ? 'polygon' : 'no_ledger');"] } }]
-    },
-    {
-      "name": "06 Create W3C Schema",
-      "request": {
-        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"type\": \"json\",\n  \"schemaPayload\": {\n    \"schemaName\": \"{{schema_name}}\",\n    \"schemaType\": \"{{schema_type_value}}\",\n    \"attributes\": [\n      { \"attributeName\": \"firstName\", \"schemaDataType\": \"string\", \"displayName\": \"First Name\", \"isRequired\": true },\n      { \"attributeName\": \"lastName\", \"schemaDataType\": \"string\", \"displayName\": \"Last Name\", \"isRequired\": true },\n      { \"attributeName\": \"employeeId\", \"schemaDataType\": \"string\", \"displayName\": \"Employee ID\", \"isRequired\": true }\n    ],\n    \"description\": \"{{schema_name}}\",\n    \"orgId\": \"{{org_id}}\"\n  }\n}" },
-        "url": { "raw": "{{base_url}}/orgs/{{org_id}}/schemas", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "schemas"] }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const j = pm.response.json();", "const sid = j?.data?.schemaLedgerId || j?.data?.schemaId || j?.data?.id || '';", "pm.environment.set('schema_id_raw', sid);", "pm.test('schema_id_raw captured', function(){pm.expect(sid).to.not.equal('');});"] } }]
-    },
-    {
-      "name": "07 Issue Credential Email (jsonld)",
-      "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const baseRaw = pm.environment.get('schema_file_server_url') || 'http://schema-file-server:4000/schemas/';", "const idRaw = (pm.environment.get('schema_id_raw') || '').trim();", "let base = baseRaw.trim().replace(/\\/+$/, '');", "if (!/\\/schemas$/i.test(base)) base = base + '/schemas';", "let context2 = '';", "if (/^https?:\\/\\//i.test(idRaw)) { context2 = idRaw; }", "else if (/^\\/schemas\\//.test(idRaw)) { const origin = base.replace(/\\/schemas$/i, ''); context2 = origin + idRaw; }", "else if (/^[^\\s]+:\\d+\\/schemas\\//.test(idRaw)) { context2 = 'http://' + idRaw; }", "else { context2 = base + '/' + encodeURIComponent(idRaw); }", "pm.environment.set('schema_context_url', context2);", "if (!pm.environment.get('employee_id')) pm.environment.set('employee_id', 'EMP-' + Date.now());"] } }],
-      "request": {
-        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
-        "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"credentialOffer\": [\n    {\n      \"emailId\": \"{{email_to}}\",\n      \"credential\": {\n        \"@context\": [\n          \"https://www.w3.org/2018/credentials/v1\",\n          \"{{schema_context_url}}\"\n        ],\n        \"type\": [\n          \"VerifiableCredential\",\n          \"{{schema_name}}\"\n        ],\n        \"issuer\": {\n          \"id\": \"{{org_did}}\"\n        },\n        \"issuanceDate\": \"{{$isoTimestamp}}\",\n        \"credentialSubject\": {\n          \"firstName\": \"Maria\",\n          \"lastName\": \"Garcia\",\n          \"employeeId\": \"{{employee_id}}\"\n        }\n      },\n      \"options\": {\n        \"proofType\": \"Ed25519Signature2018\",\n        \"proofPurpose\": \"assertionMethod\"\n      }\n    }\n  ],\n  \"protocolVersion\": \"v2\",\n  \"isReuseConnection\": true,\n  \"credentialType\": \"jsonld\"\n}" },
-        "url": { "raw": "{{base_url}}/orgs/{{org_id}}/credentials/oob/email?credentialType=jsonld", "host": ["{{base_url}}"], "path": ["orgs", "{{org_id}}", "credentials", "oob", "email"], "query": [{ "key": "credentialType", "value": "jsonld" }] }
-      }
-    },
-    {
-      "name": "08 List Issued Credentials",
-      "request": {
-        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
-        "method": "GET",
-        "url": {
-          "raw": "{{base_url}}/orgs/{{org_id}}/credentials?pageSize=10&pageNumber=1&search=&sortBy=desc&sortField=createdAt",
-          "host": ["{{base_url}}"],
-          "path": ["orgs", "{{org_id}}", "credentials"],
-          "query": [
-            { "key": "pageSize", "value": "10" },
-            { "key": "pageNumber", "value": "1" },
-            { "key": "search", "value": "" },
-            { "key": "sortBy", "value": "desc" },
-            { "key": "sortField", "value": "createdAt" }
-          ]
+      "name": "── Folder B: OID4VCI SD-JWT + OID4VP ──",
+      "item": [
+        {
+          "name": "09 Create SD-JWT Schema (no_ledger)",
+          "description": "Creates a schema in schema-file-server for SD-JWT VC issuance.\nschemaType=no_ledger means it is NOT anchored to any blockchain ledger.\nThe returned schemaLedgerId is the schema-file-server URL used as the vct in the SD-JWT.",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('sdjwt_schema_name')) {",
+                  "  pm.environment.set('sdjwt_schema_name', 'EmploymentOID4VC-' + Date.now());",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function(){pm.response.to.have.status(201);});",
+                  "const j = pm.response.json();",
+                  "const sid = j?.data?.schemaLedgerId || j?.data?.schemaId || j?.data?.id || '';",
+                  "pm.environment.set('sdjwt_schema_id', sid);",
+                  "pm.test('sdjwt_schema_id captured', function(){pm.expect(sid).to.not.equal('');});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"json\",\n  \"schemaPayload\": {\n    \"schemaName\": \"{{sdjwt_schema_name}}\",\n    \"schemaType\": \"no_ledger\",\n    \"attributes\": [\n      { \"attributeName\": \"given_name\",           \"schemaDataType\": \"string\", \"displayName\": \"Given Name\",       \"isRequired\": true },\n      { \"attributeName\": \"family_name\",          \"schemaDataType\": \"string\", \"displayName\": \"Family Name\",      \"isRequired\": true },\n      { \"attributeName\": \"document_number\",      \"schemaDataType\": \"string\", \"displayName\": \"Document Number\",  \"isRequired\": false },\n      { \"attributeName\": \"employer_name\",        \"schemaDataType\": \"string\", \"displayName\": \"Employer Name\",    \"isRequired\": true },\n      { \"attributeName\": \"employment_status\",    \"schemaDataType\": \"string\", \"displayName\": \"Status\",           \"isRequired\": true },\n      { \"attributeName\": \"position_title\",       \"schemaDataType\": \"string\", \"displayName\": \"Position\",         \"isRequired\": true },\n      { \"attributeName\": \"employment_start_date\",\"schemaDataType\": \"string\", \"displayName\": \"Start Date\",       \"isRequired\": true }\n    ],\n    \"description\": \"{{sdjwt_schema_name}}\",\n    \"orgId\": \"{{org_id}}\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/orgs/{{org_id}}/schemas",
+              "host": ["{{base_url}}"],
+              "path": ["orgs", "{{org_id}}", "schemas"]
+            }
+          }
+        },
+        {
+          "name": "10 Issue SD-JWT VC via OID4VCI OOB Email",
+          "description": "Issues an SD-JWT VC via OID4VCI OOB email flow.\n\ncredentialType=sdjwt → Credo produces an openid-credential-offer:// URL.\nThe holder opens this URL in an OID4VCI-compatible wallet (Inji, MATTR, etc.).\n\nPayload format:\n  - credentialOffer[].attributes: flat key-value array (NO @context, NO W3C wrapper)\n  - credentialDefinitionId: the schema ID from step 09\n  - isReuseConnection: true",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function(){pm.response.to.have.status(201);});",
+                  "const j = pm.response.json();",
+                  "const offerUrl = j?.data?.credentialOffer || j?.data?.offerUrl || j?.data?.invitationUrl || '';",
+                  "pm.environment.set('oid4vci_offer_url', offerUrl);",
+                  "const issuanceId = j?.data?.id || '';",
+                  "pm.environment.set('oid4vci_issuance_id', issuanceId);",
+                  "if (offerUrl) {",
+                  "  console.log('OID4VCI Offer URL:', offerUrl);",
+                  "  pm.test('OID4VCI offer URL returned', function(){pm.expect(offerUrl).to.include('openid-credential-offer');});",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credentialOffer\": [\n    {\n      \"emailId\": \"{{email_to}}\",\n      \"attributes\": [\n        { \"name\": \"given_name\",            \"value\": \"María José\" },\n        { \"name\": \"family_name\",           \"value\": \"García Pérez\" },\n        { \"name\": \"document_number\",       \"value\": \"001-1985031-4\" },\n        { \"name\": \"employer_name\",         \"value\": \"Ministerio de Trabajo\" },\n        { \"name\": \"employment_status\",     \"value\": \"active\" },\n        { \"name\": \"position_title\",        \"value\": \"Técnico en Sistemas\" },\n        { \"name\": \"employment_start_date\", \"value\": \"2018-06-01\" }\n      ]\n    }\n  ],\n  \"credentialDefinitionId\": \"{{sdjwt_schema_id}}\",\n  \"isReuseConnection\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/orgs/{{org_id}}/credentials/oob/email?credentialType=sdjwt",
+              "host": ["{{base_url}}"],
+              "path": ["orgs", "{{org_id}}", "credentials", "oob", "email"],
+              "query": [{ "key": "credentialType", "value": "sdjwt" }]
+            }
+          }
+        },
+        {
+          "name": "11 List Issued Credentials (OID4VCI check)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/orgs/{{org_id}}/credentials?pageSize=5&pageNumber=1&search=&sortBy=desc&sortField=createDateTime",
+              "host": ["{{base_url}}"],
+              "path": ["orgs", "{{org_id}}", "credentials"],
+              "query": [
+                { "key": "pageSize", "value": "5" },
+                { "key": "pageNumber", "value": "1" },
+                { "key": "search", "value": "" },
+                { "key": "sortBy", "value": "desc" },
+                { "key": "sortField", "value": "createDateTime" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "12 Create OID4VP Proof Request (OOB)",
+          "description": "Creates an OID4VP proof request URL.\nThe holder scans this URL in their wallet and presents the SD-JWT VC.\nResponse includes a proofUrl (openid4vp:// or https://) and a proof ID for polling.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function(){pm.response.to.have.status(201);});",
+                  "const j = pm.response.json();",
+                  "const proofId = j?.data?.id || '';",
+                  "const proofUrl = j?.data?.proofUrl || j?.data?.invitationUrl || '';",
+                  "pm.environment.set('oid4vp_proof_id', proofId);",
+                  "pm.environment.set('oid4vp_proof_url', proofUrl);",
+                  "pm.test('proof_id captured', function(){pm.expect(proofId).to.not.equal('');});",
+                  "if (proofUrl) console.log('OID4VP Proof Request URL:', proofUrl);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"Employment verification — CDPI PoC OID4VP\",\n  \"proofReqPayload\": {\n    \"name\": \"employment-check\",\n    \"version\": \"1.0\",\n    \"requested_attributes\": {\n      \"attr_given_name\": {\n        \"name\": \"given_name\",\n        \"restrictions\": [{ \"schema_id\": \"{{sdjwt_schema_id}}\" }]\n      },\n      \"attr_employer\": {\n        \"name\": \"employer_name\",\n        \"restrictions\": [{ \"schema_id\": \"{{sdjwt_schema_id}}\" }]\n      },\n      \"attr_status\": {\n        \"name\": \"employment_status\",\n        \"restrictions\": [{ \"schema_id\": \"{{sdjwt_schema_id}}\" }]\n      }\n    },\n    \"requested_predicates\": {}\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/orgs/{{org_id}}/proofs/oob",
+              "host": ["{{base_url}}"],
+              "path": ["orgs", "{{org_id}}", "proofs", "oob"]
+            }
+          }
+        },
+        {
+          "name": "13 Poll Proof State",
+          "description": "Poll the proof state after holder presents in wallet.\nExpected states: request-sent → done (or abandoned if holder declines).\nIn automated tests without a live wallet, state will stay 'request-sent'.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function(){pm.response.to.have.status(200);});",
+                  "const j = pm.response.json();",
+                  "const state = j?.data?.state || j?.state || 'unknown';",
+                  "console.log('Proof state:', state);",
+                  "pm.environment.set('oid4vp_proof_state', state);",
+                  "if (state === 'done' || state === 'verified') {",
+                  "  const isVerified = j?.data?.isVerified;",
+                  "  pm.test('Proof verified', function(){pm.expect(isVerified).to.equal(true);});",
+                  "} else {",
+                  "  pm.test('Proof in progress (state: ' + state + ')', function(){",
+                  "    pm.expect(['request-sent','presentation-received','done','verified']).to.include(state);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/orgs/{{org_id}}/proofs/{{oid4vp_proof_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["orgs", "{{org_id}}", "proofs", "{{oid4vp_proof_id}}"]
+            }
+          }
         }
-      }
+      ]
     }
   ]
 }
