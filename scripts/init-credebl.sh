@@ -369,11 +369,14 @@ apply_container_patches() {
   docker compose restart agent-service >/dev/null
 
   echo "  Waiting for restarted containers to be ready..."
-  local deadline=$(( $(date +%s) + 60 ))
+  local deadline=$(( $(date +%s) + 90 ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    local gw_health
+    local gw_health as_log
     gw_health="$(docker inspect credebl-api-gateway --format '{{.State.Health.Status}}' 2>/dev/null || true)"
-    [ "$gw_health" = "healthy" ] && break
+    as_log="$(docker logs credebl-agent-service --tail=5 2>/dev/null || true)"
+    [ "$gw_health" = "healthy" ] \
+      && printf '%s' "$as_log" | grep -q 'listening to NATS' \
+      && break
     sleep 3
   done
   echo "  Patches applied."
@@ -609,16 +612,23 @@ ensure_platform_admin_tenant() {
   # Normalize endpoint (ensure http:// prefix)
   [[ "$endpoint" =~ ^https?:// ]] || endpoint="http://${endpoint}"
 
-  # Get Credo root JWT.
+  # Get Credo root JWT — retry up to 8 times (40s total) to handle Credo still
+  # starting up after being restarted by patch_credo_credential_events.
   # Credo's /agent/token returns {"token":"..."} — NOT {"access_token":"..."}.
-  local root_jwt
-  root_jwt="$(curl -sf --max-time 10 -X POST \
-    -H "Authorization: $AGENT_API_KEY" \
-    "${endpoint}/agent/token" 2>/dev/null \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token', d.get('access_token','')))" 2>/dev/null || true)"
+  local root_jwt attempt=1
+  while [ "$attempt" -le 8 ]; do
+    root_jwt="$(curl -sf --max-time 10 -X POST \
+      -H "Authorization: $AGENT_API_KEY" \
+      "${endpoint}/agent/token" 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token', d.get('access_token','')))" 2>/dev/null || true)"
+    [ -n "$root_jwt" ] && break
+    echo "  Credo not ready yet (attempt ${attempt}/8), waiting 5s..."
+    sleep 5
+    attempt=$((attempt + 1))
+  done
 
   if [ -z "$root_jwt" ]; then
-    echo "  Error: Failed to get root JWT from Credo agent at ${endpoint}." >&2
+    echo "  Error: Failed to get root JWT from Credo agent at ${endpoint} after retries." >&2
     return 1
   fi
 
@@ -694,9 +704,9 @@ process.stdout.write(encrypted);
 
   # Restart agent-service so it picks up the new apiKey on next request
   # Restart agent-service so it picks up the refreshed apiKey on the next request.
-  # Give it 10s to reconnect to NATS before the caller proceeds.
+  # Give it 20s for Nest bootstrap + Prisma migration + NATS reconnect.
   docker compose restart agent-service >/dev/null
-  sleep 10
+  sleep 20
   echo "  Agent-service restarted."
 }
 
