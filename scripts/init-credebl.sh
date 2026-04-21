@@ -262,6 +262,65 @@ JSEOF
   fi
 }
 
+patch_credo_proof_events() {
+  # Patch 7 — Credo ProofEvents.js crash in multi-tenancy root agent
+  #
+  # Two bugs in ProofEvents.js crash Credo when an OOB proof request is created:
+  #
+  # Bug A: contextCorrelationId starts with "tenant-" (it is a context correlation ID,
+  # not a bare tenant UUID). getTenantAgent({tenantId: "tenant-abc..."}) throws:
+  #   "Tenant id already starts with 'tenant-'. You are probably passing a context
+  #    correlation id"
+  # Fix A: strip the "tenant-" prefix before passing to getTenantAgent.
+  #
+  # Bug B: tenantAgent.proofs is undefined in the multi-tenancy root agent context.
+  # Calling tenantAgent.proofs.getFormatData(record.id) throws TypeError, crashing
+  # the event handler and causing ECONNRESET on the proof request.
+  # Fix B: wrap the getFormatData call in try-catch (same pattern as Patch 3).
+  #
+  # _Symptom if missing_: POST /orgs/{id}/proofs/oob returns 500 "Something went wrong!"
+  # with Credo log: CredoError "Tenant id already starts with 'tenant-'" → crash →
+  # restart; after Fix A applied but before Fix B: TypeError "Cannot read properties of
+  # undefined (reading 'getFormatData')" → crash → restart.
+  local credo_container
+  credo_container="$(docker ps --format '{{.Names}}' | grep -v '^credebl-' | grep -v '^[0-9a-f]\{12\}_credebl' | head -1)"
+  if [ -z "$credo_container" ]; then
+    echo "  No Credo controller container found — skipping."
+    return 0
+  fi
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_proof_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
+const fs = require('fs');
+const path = '/app/build/events/ProofEvents.js';
+let c = fs.readFileSync(path, 'utf8');
+if (c.includes('proofData try-catch guard')) { process.stdout.write('already patched\n'); process.exit(0); }
+// Fix A: strip "tenant-" prefix from contextCorrelationId before getTenantAgent
+const tenantIdTarget = 'tenantId: event.metadata.contextCorrelationId,';
+if (c.indexOf(tenantIdTarget) >= 0) {
+  c = c.replace(tenantIdTarget,
+    "tenantId: event.metadata.contextCorrelationId.indexOf('tenant-') === 0 ? event.metadata.contextCorrelationId.slice(7) : event.metadata.contextCorrelationId, // tenant- prefix guard");
+}
+// Fix B: wrap tenantAgent.proofs.getFormatData in try-catch
+const getFormatTarget = 'const data = await tenantAgent.proofs.getFormatData(record.id);\n            body.proofData = data;';
+if (c.indexOf(getFormatTarget) >= 0) {
+  c = c.replace(getFormatTarget,
+    'try { if (tenantAgent && tenantAgent.proofs) { const data = await tenantAgent.proofs.getFormatData(record.id); body.proofData = data; } } catch (e) { /* proofData try-catch guard */ }');
+}
+if (!c.includes('proofData try-catch guard')) { process.stderr.write('ERROR: patch target not found in ProofEvents.js\n'); process.exit(1); }
+fs.writeFileSync(path, c);
+process.stdout.write('patched\n');
+JSEOF
+  docker cp "$patch_script" "${credo_container}:/tmp/patch_proof.js"
+  rm -f "$patch_script"
+  local result
+  result="$(docker exec --user root "$credo_container" node /tmp/patch_proof.js)"
+  printf '%s\n' "$result"
+  if [ "$result" = "patched" ]; then
+    docker restart "$credo_container" >/dev/null
+  fi
+}
+
 patch_issuance_schema_url() {
   # Studio's URL builder function incorrectly prepends http:// to URLs that already
   # have it (regex matches http://host:port/schemas/ as host:port/schemas/).
@@ -1100,9 +1159,11 @@ apply_container_patches
 
 ensure_platform_admin_shared_agent
 
-# Re-apply the Credo patch now that the platform admin agent container is running.
+# Re-apply Credo patches now that the platform admin agent container is running.
 echo -n "  Patching Credo CredentialEvents (post-agent-spawn): "
 patch_credo_credential_events
+echo -n "  Patching Credo ProofEvents (post-agent-spawn): "
+patch_credo_proof_events
 
 ensure_platform_admin_tenant
 
