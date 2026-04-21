@@ -87,6 +87,7 @@ var fs=require('fs');
 var p='/app/build/events/CredentialEvents.js';
 var c=fs.readFileSync(p,'utf8');
 if(c.includes('credentials try-catch guard')){process.stdout.write('already patched\n');process.exit(0);}
+if(c.includes('getFormatData unavailable')){process.stdout.write('already patched (upstream)\n');process.exit(0);}
 var t='const data = await tenantAgent.credentials.getFormatData(record.id);\n            body.credentialData = data;';
 if(!c.includes(t)){process.stderr.write('target not found\n');process.exit(1);}
 c=c.replace(t,'try { if (tenantAgent && tenantAgent.credentials) { const data = await tenantAgent.credentials.getFormatData(record.id); body.credentialData = data; } } catch (e) { /* credentials try-catch guard */ }');
@@ -123,5 +124,5 @@ echo "=== All patches applied. Verifying ==="
 docker exec credebl-utility node -e "var c=require('fs').readFileSync('/app/dist/apps/utility/main.js','utf8');process.stdout.write('Patch1: '+(c.includes('PATCH: S3 MinIO')?'OK':'MISSING')+'\n');" 2>/dev/null
 docker exec credebl-api-gateway node -e "var c=require('fs').readFileSync('/app/dist/apps/api-gateway/main.js','utf8');process.stdout.write('Patch2: '+(c.includes('require_tld:false')?'OK':'MISSING')+'\n');" 2>/dev/null
 docker exec credebl-issuance node -e "var c=require('fs').readFileSync('/app/dist/apps/issuance/main.js','utf8');process.stdout.write('Patch4: '+(c.includes('PATCH: schema URL dedup')?'OK':'MISSING')+' Patch5: '+(c.includes('ctx.map(function(url)')?'OK':'MISSING')+'\n');" 2>/dev/null
-docker exec "$CREDO" node -e "var c=require('fs').readFileSync('/app/build/events/CredentialEvents.js','utf8');process.stdout.write('Patch3: '+(c.includes('credentials try-catch guard')?'OK':'MISSING')+'\n');" 2>/dev/null
+docker exec "$CREDO" node -e "var c=require('fs').readFileSync('/app/build/events/CredentialEvents.js','utf8');process.stdout.write('Patch3: '+((c.includes('credentials try-catch guard')||c.includes('getFormatData unavailable'))?'OK':'MISSING')+'\n');" 2>/dev/null
 docker exec "$CREDO" node -e "var c=require('fs').readFileSync('/app/build/events/ProofEvents.js','utf8');process.stdout.write('Patch7: '+(c.includes('proofData try-catch guard')?'OK':'MISSING')+'\n');" 2>/dev/null
