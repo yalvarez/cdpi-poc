@@ -406,6 +406,35 @@ JSEOF
   docker exec --user root credebl-agent-service node /tmp/patch_agent_ct.js
 }
 
+ensure_brand_logo() {
+  # Upload CREDEBL logo to MinIO orgLogos/ and set BRAND_LOGO in .env.
+  # The issuance email template uses BRAND_LOGO for the header image.
+  # Without it the email shows a broken <img src="undefined"> tag.
+  if grep -q '^BRAND_LOGO=' "$ENV_FILE" 2>/dev/null; then
+    echo "  BRAND_LOGO already configured — skipping logo upload."
+    return 0
+  fi
+  echo "  Uploading CREDEBL logo to MinIO..."
+  # Copy logo from Studio image (always present) to MinIO orgLogos/
+  docker cp credebl-studio:/app/public/images/CREDEBL_LOGO.png /tmp/credebl-logo-upload.png 2>/dev/null
+  if [ ! -f /tmp/credebl-logo-upload.png ]; then
+    echo "  WARNING: Could not find logo in Studio container — skipping."
+    return 0
+  fi
+  docker cp /tmp/credebl-logo-upload.png credebl-minio:/tmp/credebl-logo-upload.png 2>/dev/null
+  docker exec credebl-minio mc alias set cdpi http://localhost:9000 \
+    "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" --quiet 2>/dev/null
+  docker exec credebl-minio mc cp /tmp/credebl-logo-upload.png \
+    cdpi/credebl-bucket/orgLogos/credebl-logo.png 2>/dev/null
+  rm -f /tmp/credebl-logo-upload.png
+  LOGO_URL="http://${VPS_IP}:9000/credebl-bucket/orgLogos/credebl-logo.png"
+  printf '\n# Email branding — set by init-credebl.sh\nBRAND_LOGO=%s\nIOS_DOWNLOAD_LINK=https://apps.apple.com/in/app/inji-wallet/id1631979601\n' "$LOGO_URL" >> "$ENV_FILE"
+  echo "  Logo available at: $LOGO_URL"
+  echo "  BRAND_LOGO and IOS_DOWNLOAD_LINK added to .env — restarting issuance..."
+  docker compose up -d --force-recreate issuance >/dev/null 2>&1 &
+  sleep 5
+}
+
 apply_container_patches() {
   echo
   echo "Applying CREDEBL container patches..."
@@ -1154,6 +1183,10 @@ else
 fi
 
 ensure_minio_setup
+
+echo
+echo "Ensuring email branding assets..."
+ensure_brand_logo
 
 apply_container_patches
 
