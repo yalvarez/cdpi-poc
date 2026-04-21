@@ -431,7 +431,9 @@ ensure_brand_logo() {
   printf '\n# Email branding — set by init-credebl.sh\nBRAND_LOGO=%s\nIOS_DOWNLOAD_LINK=https://apps.apple.com/in/app/inji-wallet/id1631979601\n' "$LOGO_URL" >> "$ENV_FILE"
   echo "  Logo available at: $LOGO_URL"
   echo "  BRAND_LOGO and IOS_DOWNLOAD_LINK added to .env — restarting issuance..."
-  docker compose up -d --force-recreate issuance >/dev/null 2>&1 &
+  # Use docker restart (not compose up --force-recreate) to avoid cascading other containers
+  # and losing in-container patches that were applied earlier.
+  docker restart credebl-issuance >/dev/null 2>&1 &
   sleep 5
 }
 
