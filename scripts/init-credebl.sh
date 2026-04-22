@@ -1462,8 +1462,15 @@ run_ssl_setup() {
   # This wipes container-filesystem patches (issuance, api-gateway, etc.).
   ssl_restart_services
 
-  # Step 5 — re-apply all container patches because ssl_restart_services just
-  # recreated issuance and api-gateway, discarding the patches applied earlier.
+  # Step 5 — rebuild Studio with the baked-in HTTPS env vars.
+  # IMPORTANT: do this BEFORE re-applying patches. docker compose up -d studio reads
+  # the updated .env and may recreate api-gateway / issuance to pick up changed env
+  # vars (API_GATEWAY_PROTOCOL, KEYCLOAK_DOMAIN, etc.). Any patches applied before
+  # the studio rebuild would be lost when those containers are recreated from image.
+  ssl_rebuild_studio "$vps_domain"
+
+  # Step 6 — re-apply all container patches AFTER the Studio rebuild, so any
+  # container recreations triggered by docker compose up -d studio are already done.
   echo
   echo "Re-applying container patches after SSL service restarts..."
   echo -n "  Utility S3→MinIO: "
@@ -1494,9 +1501,6 @@ run_ssl_setup() {
   patch_credo_credential_events
   echo -n "  Credo ProofEvents: "
   patch_credo_proof_events
-
-  # Step 6 — rebuild Studio with the baked-in HTTPS env vars
-  ssl_rebuild_studio "$vps_domain"
 
   echo
   echo "  HTTPS setup complete."
