@@ -846,6 +846,59 @@ fi
 [ -f "$MASTER_TABLE" ]  || { echo "Error: seed config not found at $MASTER_TABLE" >&2; exit 1; }
 
 # =============================================================================
+# PATCH-ONLY MODE
+# =============================================================================
+# When an existing .env is found the operator can choose to re-apply all
+# container patches and refresh the Credo tenant JWT without touching secrets,
+# rebuilding images, or running docker compose up. This replaces any need for a
+# separate apply-patches.sh script — everything runs from this single entry point.
+
+if [ -f "$ENV_FILE" ]; then
+  echo
+  echo "============================================================"
+  echo " CDPI PoC — CREDEBL initializer"
+  echo "============================================================"
+  echo " Existing deployment found."
+  echo "============================================================"
+  echo
+  if ask_yes_no "Re-apply container patches + refresh Credo JWT? (No = full re-initialization)" "Y"; then
+    echo
+    echo "=== Re-applying patches to existing deployment ==="
+
+    # Load the variables we need from the existing .env.
+    # Use grep+cut so we never source the whole file (avoids eval of arbitrary values).
+    _ev() { grep "^${1}=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
+    POSTGRES_PASSWORD="$(_ev POSTGRES_PASSWORD)"
+    AGENT_API_KEY="$(_ev AGENT_API_KEY)"
+    PLATFORM_WALLET_NAME="$(_ev PLATFORM_WALLET_NAME)"
+    PLATFORM_ADMIN_EMAIL="$(_ev PLATFORM_ADMIN_EMAIL)"
+    VPS_HOST="$(_ev VPS_IP)"          # written as VPS_IP in .env
+    USE_SENDGRID=false
+    [ "$(_ev EMAIL_PROVIDER)" = "sendgrid" ] && USE_SENDGRID=true
+    EMAIL_FROM_VAL="$(_ev EMAIL_FROM)"
+
+    cd "$CREDEBL_DIR"
+
+    apply_container_patches
+
+    echo -n "  Patching Credo CredentialEvents (post-agent-spawn): "
+    patch_credo_credential_events
+    echo -n "  Patching Credo ProofEvents (post-agent-spawn): "
+    patch_credo_proof_events
+
+    ensure_platform_admin_tenant
+
+    [ "$USE_SENDGRID" = "true" ] && ensure_sendgrid_from_address
+
+    echo
+    bash "$SCRIPT_DIR/health-check.sh"
+    echo
+    echo "Patches re-applied successfully."
+    exit 0
+  fi
+fi
+
+# =============================================================================
 # INTERACTIVE PROMPTS — 5 questions, 6-7 if SSL is requested
 # =============================================================================
 
