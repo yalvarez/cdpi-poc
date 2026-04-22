@@ -829,6 +829,377 @@ process.stdout.write(encrypted);
 }
 
 # =============================================================================
+# SSL / NGINX FUNCTIONS
+# =============================================================================
+# All logic from the former setup-keycloak-https.sh is inlined here.
+# Nginx + Certbot operations require root; run via sudo temp-script.
+# All other steps (env update, service restarts) run as the current user.
+
+set_env_var() {
+  # Replace KEY=... line in file, or append if missing.
+  local file="$1" key="$2" value="$3"
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+ssl_update_env() {
+  local domain="$1" vps_domain="${2:-}"
+  echo "  Updating .env: KEYCLOAK_PUBLIC_URL + KEYCLOAK_DOMAIN → https://${domain}"
+  set_env_var "$ENV_FILE" "KEYCLOAK_PUBLIC_URL" "https://${domain}"
+  # KEYCLOAK_DOMAIN must have trailing slash — CREDEBL validates JWT iss against it
+  set_env_var "$ENV_FILE" "KEYCLOAK_DOMAIN" "https://${domain}/"
+  if [ -n "$vps_domain" ]; then
+    echo "  Updating .env: Studio + API URLs → https://${vps_domain}"
+    set_env_var "$ENV_FILE" "API_GATEWAY_PROTOCOL" "https"
+    set_env_var "$ENV_FILE" "APP_PROTOCOL"          "https"
+    set_env_var "$ENV_FILE" "API_ENDPOINT"          "$vps_domain"
+    set_env_var "$ENV_FILE" "STUDIO_URL"            "https://${vps_domain}"
+    set_env_var "$ENV_FILE" "PLATFORM_WEB_URL"      "https://${vps_domain}"
+    set_env_var "$ENV_FILE" "FRONT_END_URL"         "https://${vps_domain}"
+    set_env_var "$ENV_FILE" "SOCKET_HOST"           "https://${vps_domain}"
+    set_env_var "$ENV_FILE" "ENABLE_CORS_IP_LIST"   "https://${vps_domain},http://localhost:3000,http://127.0.0.1:3000"
+  fi
+}
+
+ssl_restart_keycloak() {
+  echo "  Recreating Keycloak so KC_HOSTNAME picks up the new HTTPS domain..."
+  docker compose up -d --force-recreate keycloak >/dev/null
+}
+
+ssl_wait_for_keycloak() {
+  local attempt
+  echo "  Waiting for Keycloak on http://127.0.0.1:8080..."
+  for attempt in $(seq 1 30); do
+    curl -fsS "http://127.0.0.1:8080/health/ready" >/dev/null 2>&1 \
+      || curl -fsS "http://127.0.0.1:8080" >/dev/null 2>&1 \
+      && { echo "  Keycloak is ready."; return 0; }
+    sleep 2
+  done
+  echo "  Warning: Keycloak did not report ready within 60s — continuing."
+}
+
+ssl_restart_services() {
+  echo "  Restarting CREDEBL services so KEYCLOAK_DOMAIN / HTTPS URLs take effect..."
+  docker compose restart api-gateway user organization issuance verification ledger connection cloud-wallet >/dev/null
+}
+
+ssl_rebuild_studio() {
+  local vps_domain="${1:-}"
+  [ -z "$vps_domain" ] && return 0
+  echo "  Rebuilding Studio with HTTPS env vars (5-8 min)..."
+  docker compose build studio
+  docker compose up -d --no-build studio >/dev/null
+  echo "  Studio rebuilt."
+}
+
+ssl_nginx_certbot() {
+  # Installs nginx + certbot, writes proxy configs, issues Let's Encrypt certs.
+  # This block needs root — the real work happens inside a temp bash script
+  # so we can sudo just this section without re-running the whole init.
+  local domain="$1" vps_domain="${2:-}" email="$3"
+  local tmp
+  tmp=$(mktemp /tmp/ssl_setup_XXXXXX.sh)
+  chmod 700 "$tmp"
+
+  # NOTE: outer heredoc is single-quoted (<< 'SSLEOF') so no bash expansion
+  # happens here. All $domain, $host, etc. are literal and expanded later
+  # by the temp script itself when it runs.
+  cat > "$tmp" << 'SSLEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+domain="$1"; vps_domain="${2:-}"; email="$3"
+webroot="/var/www/certbot"
+kc_port=8080
+
+log()  { echo "  [SSL] $*"; }
+warn() { echo "  [SSL] WARN: $*" >&2; }
+
+reload_nginx() {
+  nginx -t
+  systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || nginx -s reload
+}
+
+cert_is_valid() {
+  local cert="/etc/letsencrypt/live/${1}/fullchain.pem"
+  [ -f "$cert" ] && openssl x509 -checkend 86400 -noout -in "$cert" 2>/dev/null
+}
+
+# ── Install packages ────────────────────────────────────────────────────
+log "Installing nginx + certbot..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq nginx certbot python3-certbot-nginx curl openssl ufw
+
+systemctl enable nginx >/dev/null 2>&1 || true
+systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || nginx
+
+# ── Firewall ────────────────────────────────────────────────────────────
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow 80/tcp  comment 'HTTP ACME'   >/dev/null 2>&1 || true
+  ufw allow 443/tcp comment 'HTTPS nginx' >/dev/null 2>&1 || true
+fi
+
+# ── Check DNS ───────────────────────────────────────────────────────────
+server_ip=$(curl -4 -fsSL ifconfig.me 2>/dev/null || true)
+for d in "$domain" ${vps_domain:+"$vps_domain"}; do
+  resolved=$(getent ahostsv4 "$d" 2>/dev/null | awk 'NR==1{print $1}' || true)
+  if [ -z "$resolved" ]; then
+    warn "DNS for $d does not resolve yet — certbot may fail."
+  else
+    log "DNS: $d → $resolved"
+    [ -n "$server_ip" ] && [ "$resolved" != "$server_ip" ] \
+      && warn "$d does not point to this server ($server_ip) — DNS may not have propagated."
+  fi
+done
+
+# ── Remove default nginx site ────────────────────────────────────────────
+rm -f /etc/nginx/sites-enabled/default
+mkdir -p "$webroot"
+
+# ── Keycloak HTTP proxy ──────────────────────────────────────────────────
+kc_site="keycloak-${domain//./-}"
+kc_conf="/etc/nginx/sites-available/${kc_site}.conf"
+log "Writing Keycloak HTTP proxy → $kc_conf"
+cat > "$kc_conf" << 'NGINX'
+server {
+    listen 80; listen [::]:80;
+    server_name __DOMAIN__;
+    client_max_body_size 25m;
+    location /.well-known/acme-challenge/ { root __WEBROOT__; default_type "text/plain"; }
+    location / {
+        proxy_pass http://127.0.0.1:__KCPORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 80;
+        proxy_buffering off;
+    }
+}
+NGINX
+sed -i "s|__DOMAIN__|${domain}|g; s|__WEBROOT__|${webroot}|g; s|__KCPORT__|${kc_port}|g" "$kc_conf"
+ln -sfn "$kc_conf" "/etc/nginx/sites-enabled/${kc_site}.conf"
+reload_nginx
+
+# ── VPS domain HTTP proxy ────────────────────────────────────────────────
+vps_conf=""
+if [ -n "$vps_domain" ]; then
+  vps_site="vps-${vps_domain//./-}"
+  vps_conf="/etc/nginx/sites-available/${vps_site}.conf"
+  log "Writing VPS domain HTTP proxy → $vps_conf"
+  cat > "$vps_conf" << 'NGINX'
+server {
+    listen 80; listen [::]:80;
+    server_name __VPSDOMAIN__;
+    client_max_body_size 25m;
+    location /.well-known/acme-challenge/ { root __WEBROOT__; default_type "text/plain"; }
+    location ^~ /api/auth/ {
+        proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto http; proxy_buffering off; }
+    location ~ ^/(api|api-json)$ {
+        proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto http; proxy_buffering off; }
+    location ~ ^/v1/ {
+        proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http; proxy_buffering off; }
+    location ~ ^/auth/ {
+        rewrite ^/(.*)$ /v1/$1 break;
+        proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto http; proxy_buffering off; }
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto http;
+        proxy_read_timeout 86400; proxy_buffering off; }
+    location / {
+        proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-Proto http; proxy_buffering off; }
+}
+NGINX
+  sed -i "s|__VPSDOMAIN__|${vps_domain}|g; s|__WEBROOT__|${webroot}|g" "$vps_conf"
+  ln -sfn "$vps_conf" "/etc/nginx/sites-enabled/${vps_site}.conf"
+  reload_nginx
+fi
+
+# ── Issue certificates ───────────────────────────────────────────────────
+issue_cert() {
+  local d="$1" m="$2"
+  if cert_is_valid "$d"; then
+    log "Certificate for $d is still valid (>24h remaining) — skipping."
+    return 0
+  fi
+  log "Requesting Let's Encrypt certificate for $d ..."
+  certbot certonly --webroot -w "$webroot" --non-interactive --agree-tos \
+    --keep-until-expiring -m "$m" -d "$d"
+}
+issue_cert "$domain" "$email"
+[ -n "$vps_domain" ] && [ "$vps_domain" != "$domain" ] && issue_cert "$vps_domain" "$email"
+
+# ── Upgrade Keycloak proxy to HTTPS ─────────────────────────────────────
+if [ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]; then
+  log "Upgrading Keycloak proxy to HTTPS..."
+  cat > "$kc_conf" << 'NGINX'
+server {
+    listen 80; listen [::]:80;
+    server_name __DOMAIN__;
+    location /.well-known/acme-challenge/ { root __WEBROOT__; default_type "text/plain"; }
+    location / { return 301 https://$host$request_uri; }
+}
+server {
+    listen 443 ssl http2; listen [::]:443 ssl http2;
+    server_name __DOMAIN__;
+    ssl_certificate /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    client_max_body_size 25m;
+    location / {
+        proxy_pass http://127.0.0.1:__KCPORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_buffering off;
+    }
+}
+NGINX
+  sed -i "s|__DOMAIN__|${domain}|g; s|__WEBROOT__|${webroot}|g; s|__KCPORT__|${kc_port}|g" "$kc_conf"
+  reload_nginx
+fi
+
+# ── Upgrade VPS proxy to HTTPS ───────────────────────────────────────────
+if [ -n "$vps_domain" ] && [ -f "/etc/letsencrypt/live/${vps_domain}/fullchain.pem" ]; then
+  log "Upgrading VPS domain proxy to HTTPS..."
+  cat > "$vps_conf" << 'NGINX'
+server {
+    listen 80; listen [::]:80;
+    server_name __VPSDOMAIN__;
+    location /.well-known/acme-challenge/ { root __WEBROOT__; default_type "text/plain"; }
+    location / { return 301 https://$host$request_uri; }
+}
+server {
+    listen 443 ssl http2; listen [::]:443 ssl http2;
+    server_name __VPSDOMAIN__;
+    ssl_certificate /etc/letsencrypt/live/__VPSDOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__VPSDOMAIN__/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    client_max_body_size 25m;
+    location ^~ /api/auth/ {
+        proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; proxy_buffering off; }
+    location ~ ^/(api|api-json)$ {
+        proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; proxy_buffering off; }
+    location ~ ^/v1/ {
+        proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https; proxy_buffering off; }
+    location ~ ^/auth/ {
+        rewrite ^/(.*)$ /v1/$1 break;
+        proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; proxy_buffering off; }
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 86400; proxy_buffering off; }
+    location / {
+        proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;
+        proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-Proto https; proxy_buffering off; }
+}
+NGINX
+  sed -i "s|__VPSDOMAIN__|${vps_domain}|g; s|__WEBROOT__|${webroot}|g" "$vps_conf"
+  reload_nginx
+fi
+
+log "nginx + certbot setup complete."
+SSLEOF
+
+  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    echo "  SSL requires root — running nginx/certbot step with sudo..."
+    sudo bash "$tmp" "$domain" "$vps_domain" "$email"
+  else
+    bash "$tmp" "$domain" "$vps_domain" "$email"
+  fi
+  rm -f "$tmp"
+}
+
+run_ssl_setup() {
+  local domain="$SSL_KEYCLOAK_DOMAIN" vps_domain="${SSL_VPS_DOMAIN:-}"
+  local label="$domain"
+  [ -n "$vps_domain" ] && label="$label + $vps_domain"
+
+  echo
+  echo "Setting up HTTPS for: $label"
+
+  # Step 1 — nginx + certbot (needs root, runs via sudo temp script)
+  ssl_nginx_certbot "$domain" "$vps_domain" "$PLATFORM_ADMIN_EMAIL"
+
+  # Step 2 — update .env with HTTPS URLs
+  ssl_update_env "$domain" "$vps_domain"
+
+  # Step 3 — restart Keycloak so KC_HOSTNAME picks up the HTTPS domain
+  ssl_restart_keycloak
+  ssl_wait_for_keycloak
+
+  # Step 4 — restart CREDEBL services so they pick up KEYCLOAK_DOMAIN + HTTPS URLs.
+  # This wipes container-filesystem patches (issuance, api-gateway, etc.).
+  ssl_restart_services
+
+  # Step 5 — re-apply all container patches because ssl_restart_services just
+  # recreated issuance and api-gateway, discarding the patches applied earlier.
+  echo
+  echo "Re-applying container patches after SSL service restarts..."
+  echo -n "  Utility S3→MinIO: "
+  patch_utility_s3
+  docker compose restart utility >/dev/null
+
+  echo -n "  API gateway TLD validator: "
+  patch_api_gateway_context_validator
+  docker compose restart api-gateway >/dev/null
+
+  echo -n "  Issuance schema URL dedup: "
+  patch_issuance_schema_url
+  echo -n "  Issuance @context normalize: "
+  patch_issuance_context_urls
+  docker compose restart issuance >/dev/null
+
+  echo -n "  Agent-service create-tenant JWT: "
+  patch_agent_service_create_tenant
+  docker compose restart agent-service >/dev/null
+
+  echo -n "  Credo CredentialEvents: "
+  patch_credo_credential_events
+  echo -n "  Credo ProofEvents: "
+  patch_credo_proof_events
+
+  # Step 6 — rebuild Studio with the baked-in HTTPS env vars
+  ssl_rebuild_studio "$vps_domain"
+
+  echo
+  echo "  HTTPS setup complete."
+  echo "  Keycloak: https://${domain}"
+  [ -n "$vps_domain" ] && echo "  Studio:   https://${vps_domain}"
+  [ -n "$vps_domain" ] && echo "  API:      https://${vps_domain}/v1/"
+}
+
+# =============================================================================
 # PREREQUISITE CHECKS
 # =============================================================================
 
@@ -1024,7 +1395,7 @@ fi
 # served from that domain via nginx on port 443 — no bare port in the URL.
 # NEXT_PUBLIC_BASE_URL is baked into the Studio bundle at build time, so
 # PROTOCOL must be set to https here (before docker compose build runs) rather
-# than being patched afterwards by setup-keycloak-https.sh.
+# than being patched afterwards by run_ssl_setup.
 if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_VPS_DOMAIN" ]; then
   PROTOCOL="https"
   VPS_PUBLIC_HOST="$SSL_VPS_DOMAIN"
@@ -1347,30 +1718,7 @@ WHERE u.email = '${PLATFORM_ADMIN_EMAIL}'
 " >/dev/null
 echo "  Platform admin owner role ensured."
 
-# =============================================================================
-# SSL / HTTPS SETUP (only when requested)
-# =============================================================================
-
-if [ "$ENABLE_SSL" = "true" ]; then
-  echo
-  _ssl_label="$SSL_KEYCLOAK_DOMAIN"
-  [ -n "$SSL_VPS_DOMAIN" ] && _ssl_label="$_ssl_label + $SSL_VPS_DOMAIN"
-  echo "Setting up HTTPS certificates for: $_ssl_label ..."
-  echo "Note: requires sudo to install nginx and run certbot."
-
-  _ssl_args=(
-    --domain      "$SSL_KEYCLOAK_DOMAIN"
-    --email       "$PLATFORM_ADMIN_EMAIL"
-    --credebl-dir "$CREDEBL_DIR"
-  )
-  [ -n "$SSL_VPS_DOMAIN" ] && _ssl_args+=(--vps-domain "$SSL_VPS_DOMAIN")
-
-  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    sudo bash "$SCRIPT_DIR/setup-keycloak-https.sh" "${_ssl_args[@]}"
-  else
-    bash "$SCRIPT_DIR/setup-keycloak-https.sh" "${_ssl_args[@]}"
-  fi
-fi
+[ "$ENABLE_SSL" = "true" ] && run_ssl_setup
 
 # =============================================================================
 # HEALTH CHECK + FINAL SUMMARY
