@@ -1937,9 +1937,13 @@ printf " %-28s %s\n" "NextAuth secret:"         "$NEXTAUTH_SECRET"
 printf " %-28s %s\n" "JWT token secret:"        "$JWT_TOKEN_SECRET"
 printf " %-28s %s\n" "Crypto private key:"      "$CRYPTO_PRIVATE_KEY"
 echo " ----------------------------------------------------------"
-if [ "$USE_SENDGRID" = "true" ]; then
+if [ "$EMAIL_PROVIDER_CHOICE" = "sendgrid" ]; then
   printf " %-28s %s\n" "Email provider:"          "SendGrid"
   printf " %-28s %s\n" "SendGrid API key:"        "$SENDGRID_API_KEY_VAL"
+  printf " %-28s %s\n" "Email FROM:"              "$EMAIL_FROM_VAL"
+elif [ "$EMAIL_PROVIDER_CHOICE" = "brevo" ]; then
+  printf " %-28s %s\n" "Email provider:"          "Brevo SMTP relay"
+  printf " %-28s %s\n" "Brevo SMTP login:"        "$SMTP_USER_VAL"
   printf " %-28s %s\n" "Email FROM:"              "$EMAIL_FROM_VAL"
 else
   printf " %-28s %s\n" "Email provider:"          "Mailpit (local, port 8025)"
