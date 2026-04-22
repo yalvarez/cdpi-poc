@@ -179,7 +179,7 @@ CREDEBL's `agent-provisioning` spawns the Credo controller container via the Doc
 
 This is hardcoded in `init-credebl.sh` and the `docker-compose.yml` fallback default. Do not change to the VPS hostname/IP.
 
-### Nine required CREDEBL container patches (automated in init-credebl.sh)
+### Ten required CREDEBL container patches (automated in init-credebl.sh)
 
 These patches fix bugs in the published CREDEBL Docker images. `init-credebl.sh` applies them automatically via `apply_container_patches()` after every `docker compose up`. All are idempotent.
 
@@ -218,6 +218,10 @@ _Symptom if missing_: Credential issuance returns `500 "Something went wrong!"` 
 **Patch 9 — Issuance service OOB credential not saved to DB (upsert + orgId fix)**
 In Credo multi-tenancy, credential state-change events fire on each TENANT agent's EventEmitter, not the root agent's. `CredentialEvents.js` only listens to the root agent — it never receives the `offer-sent` event for tenant-issued credentials, never POSTs the webhook, and `saveIssuedCredentialDetails` is never called. The `credentials` table stays empty despite successful email delivery. Fix (PATCH9): change `updateSchemaIdByThreadId` from `prisma.credentials.update` (throws P2025 "Record to update not found") to `prisma.credentials.upsert`, accepting `orgId` as an optional third parameter. Fix (PATCH9B): `createdBy` and `lastChangedBy` are non-nullable `@db.Uuid` fields with no default — passing `undefined` (when `orgId` is absent) throws `PrismaClientValidationError` → uncaughtException → service crash → "no subscribers" loop. Fixed by using a fallback UUID `'00000000-0000-0000-0000-000000000000'`. Also: the OOB email call site (occurrence 2 — `credentialCreateOfferDetails.response.credentialRequestThId`) was not passing `orgId` as the third argument; now patched to pass it. Guard strings: `PATCH9: oob credential upsert` (fn signature), `PATCH9B: fallback UUID` (final state indicator).
 _Symptom if missing_: Credential issuance succeeds (email arrives) but the credential list in Studio returns 500 "no subscribers" (from repeated issuance service crashes) and the `credentials` table stays empty.
+
+**Patch 10 — Issuance service QR code attachment is corrupted binary**
+The QR code is generated as a base64 data URL (`data:image/png;base64,...`) and split to extract the raw base64 string before attaching. Without `encoding: 'base64'` in the nodemailer attachment definition, nodemailer treats the string as UTF-8 text and MIME-encodes the literal base64 characters — recipients receive a text file containing "iVBORw0KGgo..." rather than a binary PNG image. Fix: add `encoding: 'base64'` so nodemailer decodes the base64 string back to binary before transfer. Also corrects `disposition: 'attachment'` to `contentDisposition: 'attachment'` (nodemailer's canonical field name). Guard string: `PATCH10: qr encoding`.
+_Symptom if missing_: QR code email attachment appears to arrive (file is attached) but cannot be opened as an image — the file contains the raw base64 text, not PNG binary data.
 
 ### Platform-admin tenant wallet and DID creation (Patch — automated in init-credebl.sh)
 

@@ -466,6 +466,32 @@ JSEOF
   docker exec --user root credebl-issuance node /tmp/patch_issuance_oob.js
 }
 
+patch_issuance_qr_encoding() {
+  # The QR code PNG is generated as a base64 data URL and split at ';base64,' to
+  # get the raw base64 string. Without encoding:'base64' in the nodemailer attachment
+  # definition, nodemailer treats the string as UTF-8 text and MIME-encodes the
+  # base64 characters themselves — the recipient gets garbled text, not a PNG image.
+  # Fix: add encoding:'base64' so nodemailer decodes the string back to binary before
+  # MIME transfer. Also use contentDisposition (nodemailer's canonical field name).
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_issuance_qr_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/issuance/main.js';
+let content = fs.readFileSync(path, 'utf8');
+if (content.includes('PATCH10: qr encoding')) { process.stdout.write('already patched\n'); process.exit(0); }
+const old = "{\n                    filename: 'qrcode.png',\n                    content: outOfBandIssuanceQrCode.split(';base64,')[1],\n                    contentType: 'image/png',\n                    disposition: 'attachment'\n                }";
+const nw  = "{\n                    filename: 'qrcode.png',\n                    content: outOfBandIssuanceQrCode.split(';base64,')[1],\n                    contentType: 'image/png',\n                    encoding: 'base64', /*PATCH10: qr encoding*/\n                    contentDisposition: 'attachment'\n                }";
+if (!content.includes(old)) { process.stderr.write('ERROR: attachment pattern not found\n'); process.exit(1); }
+content = content.replace(old, nw);
+fs.writeFileSync(path, content);
+process.stdout.write('patched\n');
+JSEOF
+  docker cp "$patch_script" credebl-issuance:/tmp/patch_issuance_qr.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-issuance node /tmp/patch_issuance_qr.js
+}
+
 patch_agent_service_create_tenant() {
   # agent-service._createTenantWallet sends the Platform-admin's tenant JWT
   # (RestTenantAgent) as the Authorization header when calling Credo's
@@ -614,6 +640,8 @@ apply_container_patches() {
   patch_issuance_context_urls
   echo -n "  Issuance service OOB credential DB save (upsert): "
   patch_issuance_oob_credential_save
+  echo -n "  Issuance service QR code attachment encoding: "
+  patch_issuance_qr_encoding
   docker compose restart issuance >/dev/null
 
   echo -n "  Agent-service shared wallet create-tenant (root JWT): "
@@ -1452,6 +1480,8 @@ run_ssl_setup() {
   patch_issuance_context_urls
   echo -n "  Issuance OOB credential DB save (upsert): "
   patch_issuance_oob_credential_save
+  echo -n "  Issuance QR code attachment encoding: "
+  patch_issuance_qr_encoding
   docker compose restart issuance >/dev/null
 
   echo -n "  Agent-service create-tenant JWT: "
