@@ -870,7 +870,8 @@ ssl_update_env() {
   if [ -n "$vps_domain" ]; then
     echo "  Updating .env: Studio + API URLs → https://${vps_domain}"
     set_env_var "$ENV_FILE" "API_GATEWAY_PROTOCOL" "https"
-    set_env_var "$ENV_FILE" "APP_PROTOCOL"          "https"
+    # APP_PROTOCOL must stay http: agent-service uses it to call Credo admin ports
+    # (8000-8099) which only listen on HTTP. Nginx handles the HTTPS layer externally.
     set_env_var "$ENV_FILE" "API_ENDPOINT"          "$vps_domain"
     set_env_var "$ENV_FILE" "STUDIO_URL"            "https://${vps_domain}"
     set_env_var "$ENV_FILE" "PLATFORM_WEB_URL"      "https://${vps_domain}"
