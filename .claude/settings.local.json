@@ -12,7 +12,9 @@
       "Bash(curl -s \"https://raw.githubusercontent.com/credebl/platform/main/libs/common/src/response-messages\")",
       "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(f['name']\\) for f in data if 'name' in f]\")",
       "Bash(curl -s \"https://api.github.com/repos/credebl/platform/contents/libs/common/src/response-messages\")",
-      "Bash(python3 -c \" import json,sys try: data=json.load\\(sys.stdin\\) if isinstance\\(data, list\\): [print\\(f['name']\\) for f in data if 'name' in f] else: print\\(data\\) \")"
+      "Bash(python3 -c \" import json,sys try: data=json.load\\(sys.stdin\\) if isinstance\\(data, list\\): [print\\(f['name']\\) for f in data if 'name' in f] else: print\\(data\\) \")",
+      "Bash(scp c:/Users/yalva/source/repos/cdpi-poc/scripts/init-credebl.sh root@cdpi-vps:/home/apps/cdpi-poc/scripts/init-credebl.sh)",
+      "Bash(git push *)"
     ]
   }
 }
