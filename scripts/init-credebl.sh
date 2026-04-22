@@ -871,6 +871,20 @@ if ask_yes_no "Enable HTTPS with Let's Encrypt certificates?" "N"; then
   fi
 fi
 
+# 5. Email provider
+USE_SENDGRID=false
+SENDGRID_API_KEY_VAL="SG.mock-not-used"
+EMAIL_FROM_VAL="noreply@cdpi-poc.local"
+if ask_yes_no "Send real emails via SendGrid? (No = capture all emails locally with Mailpit)" "N"; then
+  USE_SENDGRID=true
+  while true; do
+    SENDGRID_API_KEY_VAL="$(ask "SendGrid API key (must start with SG.)")"
+    [[ "$SENDGRID_API_KEY_VAL" == SG.* ]] && break
+    echo "  Error: key must start with 'SG.' — try again." >&2
+  done
+  EMAIL_FROM_VAL="$(ask "From address (must be a verified SendGrid sender)" "noreply@cdpi-poc.local")"
+fi
+
 # =============================================================================
 # GENERATE ALL SECRETS
 # =============================================================================
@@ -975,7 +989,8 @@ export ENV_TEMPLATE ENV_FILE MASTER_TABLE \
   SCHEMA_FILE_SERVER_TOKEN CRYPTO_PRIVATE_KEY ADMIN_KEYCLOAK_ID ADMIN_KEYCLOAK_SECRET \
   PLATFORM_ADMIN_EMAIL VPS_HOST VPS_PUBLIC_HOST KEYCLOAK_HOST PROTOCOL \
   KEYCLOAK_DOMAIN_INTERNAL KEYCLOAK_ADMIN_URL_INTERNAL KEYCLOAK_PUBLIC_URL \
-  STUDIO_URL API_ENDPOINT PLATFORM_WEB_URL SOCKET_HOST ENABLE_CORS_IP_LIST DEEPLINK_DOMAIN
+  STUDIO_URL API_ENDPOINT PLATFORM_WEB_URL SOCKET_HOST ENABLE_CORS_IP_LIST DEEPLINK_DOMAIN \
+  USE_SENDGRID SENDGRID_API_KEY_VAL EMAIL_FROM_VAL
 
 python3 <<'PY'
 import json, os, re
@@ -1052,6 +1067,16 @@ replacements = {
     # SHORTENED_URL_DOMAIN is intentionally empty — utility service builds /default/{uuid}
     # which gets concatenated directly onto DEEPLINK_DOMAIN
     "SHORTENED_URL_DOMAIN":             "",
+    # Email provider — smtp routes through Mailpit (no external calls), sendgrid uses real API
+    "EMAIL_PROVIDER":                   "sendgrid" if e("USE_SENDGRID") == "true" else "smtp",
+    "SENDGRID_API_KEY":                 e("SENDGRID_API_KEY_VAL"),
+    "EMAIL_FROM":                       e("EMAIL_FROM_VAL"),
+    # SMTP settings are only active when EMAIL_PROVIDER=smtp (Mailpit mode)
+    "SMTP_HOST":                        "mailpit" if e("USE_SENDGRID") != "true" else "",
+    "SMTP_PORT":                        "1025"    if e("USE_SENDGRID") != "true" else "",
+    "SMTP_USER":                        "mailpit" if e("USE_SENDGRID") != "true" else "",
+    "SMTP_PASS":                        "mailpit" if e("USE_SENDGRID") != "true" else "",
+    "SMTP_SECURE":                      "false",
     "MOBILE_APP":                       '"Inji Wallet"',
     "MOBILE_APP_NAME":                  '"Inji Wallet"',
     "MOBILE_APP_DOWNLOAD_URL":          "https://inji.mosip.io",
@@ -1125,6 +1150,16 @@ printf " %-28s %s\n" "JWT secret:"              "$JWT_SECRET"
 printf " %-28s %s\n" "NextAuth secret:"         "$NEXTAUTH_SECRET"
 printf " %-28s %s\n" "JWT token secret:"        "$JWT_TOKEN_SECRET"
 printf " %-28s %s\n" "Crypto private key:"      "$CRYPTO_PRIVATE_KEY"
+echo " ----------------------------------------------------------"
+if [ "$USE_SENDGRID" = "true" ]; then
+  printf " %-28s %s\n" "Email provider:"          "SendGrid"
+  printf " %-28s %s\n" "SendGrid API key:"        "$SENDGRID_API_KEY_VAL"
+  printf " %-28s %s\n" "Email FROM:"              "$EMAIL_FROM_VAL"
+else
+  printf " %-28s %s\n" "Email provider:"          "Mailpit (local, port 8025)"
+  printf " %-28s %s\n" "Mailpit web UI:"          "http://${VPS_HOST}:8025"
+  printf " %-28s %s\n" "Email FROM:"              "$EMAIL_FROM_VAL"
+fi
 echo "============================================================"
 echo
 
