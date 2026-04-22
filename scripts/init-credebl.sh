@@ -422,6 +422,50 @@ JSEOF
   docker exec --user root credebl-agent-service node /tmp/patch_agent_ct.js
 }
 
+patch_agent_service_normalize_url() {
+  # agent-service.normalizeUrlWithProtocol prepends API_GATEWAY_PROTOCOL to any
+  # bare host:port (e.g. "credebl.bootcamp.cdpi.dev:8002"). When SSL is enabled,
+  # API_GATEWAY_PROTOCOL=https — every Credo admin call then uses HTTPS, but Credo
+  # containers only listen on plain HTTP (ports 8000-8099). This causes EPROTO or
+  # ECONNREFUSED on every provisioning attempt and every tenant token fetch.
+  #
+  # Two sub-patches:
+  #   PATCH8a: replace API_GATEWAY_PROTOCOL with AGENT_PROTOCOL in the fallback
+  #            return (handles bare host:port inputs)
+  #   PATCH8b: convert https:// → http:// in the startsWith branch
+  #            (handles agentEndPoint stored with https:// prefix)
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_agent_nu_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/agent-service/main.js';
+let content = fs.readFileSync(path, 'utf8');
+const guardA = 'PATCH8: normalizeUrlWithProtocol uses AGENT_PROTOCOL';
+const guardB = 'PATCH8b: https to http for Credo';
+const needsA = !content.includes(guardA);
+const needsB = !content.includes(guardB);
+if (!needsA && !needsB) { process.stdout.write('already patched\n'); process.exit(0); }
+let changed = false;
+if (needsA) {
+  const targetA = 'return `${process.env.API_GATEWAY_PROTOCOL}://${baseUrl}`;';
+  if (!content.includes(targetA)) { process.stderr.write('ERROR: PATCH8a target not found\n'); process.exit(1); }
+  content = content.replace(targetA, '/* ' + guardA + ' */ return `${process.env.AGENT_PROTOCOL || "http"}://${baseUrl}`;');
+  changed = true;
+}
+if (needsB) {
+  const targetB = "if (baseUrl.startsWith('http://') || baseUrl.startsWith('https://')) {\n            return baseUrl;\n        }";
+  if (!content.includes(targetB)) { process.stderr.write('ERROR: PATCH8b target not found\n'); process.exit(1); }
+  const repB = "/* " + guardB + " */ if (baseUrl.startsWith('https://')) { return 'http://' + baseUrl.slice(8); }\n        if (baseUrl.startsWith('http://')) { return baseUrl; }";
+  content = content.replace(targetB, repB);
+  changed = true;
+}
+if (changed) { fs.writeFileSync(path, content); process.stdout.write('patched\n'); }
+JSEOF
+  docker cp "$patch_script" credebl-agent-service:/tmp/patch_agent_nu.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-agent-service node /tmp/patch_agent_nu.js
+}
+
 ensure_sendgrid_from_address() {
   # The FROM address used at email-send time is read from platform_config.emailFrom
   # in Postgres — NOT from the EMAIL_FROM env var. The seed populates this column
@@ -500,6 +544,8 @@ apply_container_patches() {
 
   echo -n "  Agent-service shared wallet create-tenant (root JWT): "
   patch_agent_service_create_tenant
+  echo -n "  Agent-service normalizeUrlWithProtocol (http for Credo): "
+  patch_agent_service_normalize_url
   docker compose restart agent-service >/dev/null
 
   echo "  Waiting for restarted containers to be ready..."
@@ -743,8 +789,16 @@ ensure_platform_admin_tenant() {
     return 1
   fi
 
-  # Normalize endpoint (ensure http:// prefix)
-  [[ "$endpoint" =~ ^https?:// ]] || endpoint="http://${endpoint}"
+  # Normalize endpoint: Credo admin ports only serve HTTP.
+  # Strip https:// if present (API_GATEWAY_PROTOCOL=https can cause it to be stored
+  # with https:// when SSL is enabled), then ensure http:// prefix.
+  [[ "$endpoint" == https://* ]] && endpoint="http://${endpoint#https://}"
+  [[ "$endpoint" =~ ^http:// ]] || endpoint="http://${endpoint}"
+  # Also fix the DB record if it was stored with https://
+  docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -q -c \
+    "UPDATE org_agents SET \"agentEndPoint\" = replace(\"agentEndPoint\", 'https://', 'http://')
+     WHERE \"agentEndPoint\" LIKE 'https://%';" 2>/dev/null || true
 
   # Get Credo root JWT — retry up to 8 times (40s total) to handle Credo still
   # starting up after being restarted by patch_credo_credential_events.
@@ -1199,6 +1253,8 @@ run_ssl_setup() {
 
   echo -n "  Agent-service create-tenant JWT: "
   patch_agent_service_create_tenant
+  echo -n "  Agent-service normalizeUrlWithProtocol (http for Credo): "
+  patch_agent_service_normalize_url
   docker compose restart agent-service >/dev/null
 
   echo -n "  Credo CredentialEvents: "
