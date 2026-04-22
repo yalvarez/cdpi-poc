@@ -718,6 +718,81 @@ recover_orphan_running_agent() {
   sleep 20
 }
 
+# Keycloak 24+ only includes `sub` in access tokens when the `openid` scope is
+# present in the realm. On a plain realm import the scope may be absent because
+# Keycloak normally auto-creates it, but skips that step when importing from JSON.
+# Without `sub`, CREDEBL cannot perform the keycloakUserId lookup and every
+# profile/org endpoint returns 404 "User not found".
+# This function is idempotent: it checks before creating or linking.
+ensure_keycloak_openid_scope() {
+  echo
+  echo "Ensuring Keycloak openid scope (sub claim) is present..."
+
+  local token scope_id client_id
+
+  # Get admin token from Keycloak master realm
+  token=$(curl -sf --max-time 15 -X POST \
+    "http://localhost:8080/realms/master/protocol/openid-connect/token" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "client_id=admin-cli&username=${KEYCLOAK_ADMIN_USER}&password=${KEYCLOAK_ADMIN_PASSWORD}&grant_type=password" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2>/dev/null) || true
+  if [ -z "$token" ]; then
+    echo "  Warning: could not get Keycloak admin token — skipping openid scope check." >&2
+    return 0
+  fi
+
+  # Check if scope already exists
+  scope_id=$(curl -sf --max-time 10 \
+    "http://localhost:8080/admin/realms/credebl-realm/client-scopes" \
+    -H "Authorization: Bearer ${token}" \
+    | python3 -c 'import json,sys; s=[x["id"] for x in json.load(sys.stdin) if x["name"]=="openid"]; print(s[0] if s else "")' 2>/dev/null) || true
+
+  if [ -z "$scope_id" ]; then
+    echo "  openid scope missing — creating with oidc-sub-mapper..."
+    curl -sf --max-time 15 -X POST \
+      "http://localhost:8080/admin/realms/credebl-realm/client-scopes" \
+      -H "Authorization: Bearer ${token}" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "openid",
+        "description": "OpenID Connect built-in scope",
+        "protocol": "openid-connect",
+        "attributes": {"include.in.token.scope": "true"},
+        "protocolMappers": [{
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {"access.token.sub.claim": "true", "id.token.sub.claim": "true"}
+        }]
+      }' >/dev/null
+
+    scope_id=$(curl -sf --max-time 10 \
+      "http://localhost:8080/admin/realms/credebl-realm/client-scopes" \
+      -H "Authorization: Bearer ${token}" \
+      | python3 -c 'import json,sys; s=[x["id"] for x in json.load(sys.stdin) if x["name"]=="openid"]; print(s[0] if s else "")' 2>/dev/null) || true
+
+    [ -z "$scope_id" ] && { echo "  Warning: failed to create openid scope." >&2; return 0; }
+    echo "  openid scope created (id: ${scope_id})."
+  else
+    echo "  openid scope already present (id: ${scope_id})."
+  fi
+
+  # Add as default scope to credebl-client and adminClient (idempotent — PUT is no-op if already linked)
+  for client_name in credebl-client adminClient; do
+    client_id=$(curl -sf --max-time 10 \
+      "http://localhost:8080/admin/realms/credebl-realm/clients?clientId=${client_name}" \
+      -H "Authorization: Bearer ${token}" \
+      | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["id"] if d else "")' 2>/dev/null) || true
+    if [ -n "$client_id" ]; then
+      curl -sf --max-time 10 -X PUT \
+        "http://localhost:8080/admin/realms/credebl-realm/clients/${client_id}/default-client-scopes/${scope_id}" \
+        -H "Authorization: Bearer ${token}" >/dev/null || true
+      echo "  openid scope linked to ${client_name}."
+    fi
+  done
+}
+
 ensure_platform_admin_shared_agent() {
   echo
   echo "Ensuring platform-admin shared agent is initialized..."
@@ -1794,6 +1869,8 @@ echo "Ensuring email branding assets..."
 ensure_brand_logo
 
 apply_container_patches
+
+ensure_keycloak_openid_scope
 
 ensure_platform_admin_shared_agent
 
