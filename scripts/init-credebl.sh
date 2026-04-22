@@ -402,6 +402,49 @@ JSEOF
   docker exec --user root credebl-issuance node /tmp/patch_issuance_ctx.js
 }
 
+patch_issuance_oob_credential_save() {
+  # In Credo multi-tenancy, credential state-change events fire on the TENANT agent's
+  # EventEmitter, not the root agent's. CredentialEvents.js only listens to the root
+  # agent — so it never receives the offer-sent event, never POSTs the webhook, and
+  # saveIssuedCredentialDetails is never called. Result: credentials table stays empty
+  # after every OOB JSON-LD issuance and the credential list shows nothing.
+  # Fix: change updateSchemaIdByThreadId from prisma.update (fails P2025 when record
+  # doesn't exist) to prisma.upsert (creates the record if missing), accepting orgId
+  # as a new third param. Also pass orgId at the call site in outOfBandCredentialOffer.
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_issuance_oob_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/issuance/main.js';
+let content = fs.readFileSync(path, 'utf8');
+if (content.includes('PATCH9: oob credential upsert')) { process.stdout.write('already patched\n'); process.exit(0); }
+
+// Patch fn signature
+const oldSig = 'async updateSchemaIdByThreadId(threadId, schemaId) {';
+if (!content.includes(oldSig)) { process.stderr.write('ERROR: fn signature not found\n'); process.exit(1); }
+content = content.replace(oldSig, 'async updateSchemaIdByThreadId(threadId, schemaId, orgId) { /*PATCH9: oob credential upsert*/');
+
+// Patch update → upsert inside the function
+const oldUpdate = 'await this.prisma.credentials.update({\n                where: { threadId },\n                data: {\n                    schemaId\n                }\n            });';
+if (!content.includes(oldUpdate)) { process.stderr.write('ERROR: credentials.update block not found\n'); process.exit(1); }
+const newUpsert = "await this.prisma.credentials.upsert({\n                where: { threadId },\n                update: { schemaId },\n                create: {\n                    threadId: threadId,\n                    schemaId: schemaId,\n                    orgId: orgId || null,\n                    createdBy: orgId,\n                    lastChangedBy: orgId,\n                    state: 'offer-sent',\n                    credentialExchangeId: '',\n                    credDefId: ''\n                }\n            });";
+content = content.replace(oldUpdate, newUpsert);
+
+// Patch call site to pass orgId
+const oldCall = 'this.issuanceRepository.updateSchemaIdByThreadId((_b = record === null || record === void 0 ? void 0 : record.value) === null || _b === void 0 ? void 0 : _b.threadId, schemaId);';
+const newCall = 'this.issuanceRepository.updateSchemaIdByThreadId((_b = record === null || record === void 0 ? void 0 : record.value) === null || _b === void 0 ? void 0 : _b.threadId, schemaId, orgId);';
+if (!content.includes(oldCall)) { process.stderr.write('ERROR: call site not found\n'); process.exit(1); }
+content = content.replace(oldCall, newCall);
+
+if (!content.includes('PATCH9: oob credential upsert')) { process.stderr.write('ERROR: guard verification failed\n'); process.exit(1); }
+fs.writeFileSync(path, content);
+process.stdout.write('patched\n');
+JSEOF
+  docker cp "$patch_script" credebl-issuance:/tmp/patch_issuance_oob.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-issuance node /tmp/patch_issuance_oob.js
+}
+
 patch_agent_service_create_tenant() {
   # agent-service._createTenantWallet sends the Platform-admin's tenant JWT
   # (RestTenantAgent) as the Authorization header when calling Credo's
@@ -548,6 +591,8 @@ apply_container_patches() {
   patch_issuance_schema_url
   echo -n "  Issuance service @context URL normalization: "
   patch_issuance_context_urls
+  echo -n "  Issuance service OOB credential DB save (upsert): "
+  patch_issuance_oob_credential_save
   docker compose restart issuance >/dev/null
 
   echo -n "  Agent-service shared wallet create-tenant (root JWT): "
@@ -1384,6 +1429,8 @@ run_ssl_setup() {
   patch_issuance_schema_url
   echo -n "  Issuance @context normalize: "
   patch_issuance_context_urls
+  echo -n "  Issuance OOB credential DB save (upsert): "
+  patch_issuance_oob_credential_save
   docker compose restart issuance >/dev/null
 
   echo -n "  Agent-service create-tenant JWT: "
