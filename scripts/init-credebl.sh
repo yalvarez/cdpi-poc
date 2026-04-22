@@ -408,35 +408,56 @@ patch_issuance_oob_credential_save() {
   # agent — so it never receives the offer-sent event, never POSTs the webhook, and
   # saveIssuedCredentialDetails is never called. Result: credentials table stays empty
   # after every OOB JSON-LD issuance and the credential list shows nothing.
-  # Fix: change updateSchemaIdByThreadId from prisma.update (fails P2025 when record
-  # doesn't exist) to prisma.upsert (creates the record if missing), accepting orgId
-  # as a new third param. Also pass orgId at the call site in outOfBandCredentialOffer.
+  #
+  # PATCH9: change updateSchemaIdByThreadId from prisma.update (P2025 when record missing)
+  # to prisma.upsert. Accept orgId as a new third param. Pass orgId at bulk call site.
+  #
+  # PATCH9B: createdBy/lastChangedBy are non-nullable @db.Uuid — provide a fallback UUID
+  # so the upsert create branch never throws PrismaClientValidationError when orgId is
+  # undefined (causes uncaughtException → service crash → "no subscribers" loop).
+  # Also fix the OOB email call site (occurrence 2) which previously passed no orgId.
+  # PATCH9B: fallback UUID is the final-state guard (supersedes PATCH9 guard).
   local patch_script
   patch_script="$(mktemp /tmp/patch_issuance_oob_XXXXXX.js)"
   cat > "$patch_script" << 'JSEOF'
 const fs = require('fs');
 const path = '/app/dist/apps/issuance/main.js';
 let content = fs.readFileSync(path, 'utf8');
-if (content.includes('PATCH9: oob credential upsert')) { process.stdout.write('already patched\n'); process.exit(0); }
+if (content.includes('PATCH9B: fallback UUID')) { process.stdout.write('already patched\n'); process.exit(0); }
 
-// Patch fn signature
-const oldSig = 'async updateSchemaIdByThreadId(threadId, schemaId) {';
-if (!content.includes(oldSig)) { process.stderr.write('ERROR: fn signature not found\n'); process.exit(1); }
-content = content.replace(oldSig, 'async updateSchemaIdByThreadId(threadId, schemaId, orgId) { /*PATCH9: oob credential upsert*/');
+// --- PATCH9: update → upsert (skip if already applied) ---
+if (!content.includes('PATCH9: oob credential upsert')) {
+  const oldSig = 'async updateSchemaIdByThreadId(threadId, schemaId) {';
+  if (!content.includes(oldSig)) { process.stderr.write('ERROR: fn signature not found\n'); process.exit(1); }
+  content = content.replace(oldSig, 'async updateSchemaIdByThreadId(threadId, schemaId, orgId) { /*PATCH9: oob credential upsert*/');
 
-// Patch update → upsert inside the function
-const oldUpdate = 'await this.prisma.credentials.update({\n                where: { threadId },\n                data: {\n                    schemaId\n                }\n            });';
-if (!content.includes(oldUpdate)) { process.stderr.write('ERROR: credentials.update block not found\n'); process.exit(1); }
-const newUpsert = "await this.prisma.credentials.upsert({\n                where: { threadId },\n                update: { schemaId },\n                create: {\n                    threadId: threadId,\n                    schemaId: schemaId,\n                    orgId: orgId || null,\n                    createdBy: orgId,\n                    lastChangedBy: orgId,\n                    state: 'offer-sent',\n                    credentialExchangeId: '',\n                    credDefId: ''\n                }\n            });";
-content = content.replace(oldUpdate, newUpsert);
+  const oldUpdate = 'await this.prisma.credentials.update({\n                where: { threadId },\n                data: {\n                    schemaId\n                }\n            });';
+  if (!content.includes(oldUpdate)) { process.stderr.write('ERROR: credentials.update block not found\n'); process.exit(1); }
+  const newUpsert = "await this.prisma.credentials.upsert({\n                where: { threadId },\n                update: { schemaId },\n                create: {\n                    threadId: threadId,\n                    schemaId: schemaId,\n                    orgId: orgId || null,\n                    createdBy: orgId || '00000000-0000-0000-0000-000000000000', /*PATCH9B: fallback UUID*/\n                    lastChangedBy: orgId || '00000000-0000-0000-0000-000000000000',\n                    state: 'offer-sent',\n                    credentialExchangeId: '',\n                    credDefId: ''\n                }\n            });";
+  content = content.replace(oldUpdate, newUpsert);
 
-// Patch call site to pass orgId
-const oldCall = 'this.issuanceRepository.updateSchemaIdByThreadId((_b = record === null || record === void 0 ? void 0 : record.value) === null || _b === void 0 ? void 0 : _b.threadId, schemaId);';
-const newCall = 'this.issuanceRepository.updateSchemaIdByThreadId((_b = record === null || record === void 0 ? void 0 : record.value) === null || _b === void 0 ? void 0 : _b.threadId, schemaId, orgId);';
-if (!content.includes(oldCall)) { process.stderr.write('ERROR: call site not found\n'); process.exit(1); }
-content = content.replace(oldCall, newCall);
+  // Patch occurrence 1 call site (bulk path — orgId is in closure scope)
+  const oldCall1 = 'this.issuanceRepository.updateSchemaIdByThreadId((_b = record === null || record === void 0 ? void 0 : record.value) === null || _b === void 0 ? void 0 : _b.threadId, schemaId);';
+  if (content.includes(oldCall1)) {
+    content = content.replace(oldCall1, 'this.issuanceRepository.updateSchemaIdByThreadId((_b = record === null || record === void 0 ? void 0 : record.value) === null || _b === void 0 ? void 0 : _b.threadId, schemaId, orgId);');
+  }
+}
 
-if (!content.includes('PATCH9: oob credential upsert')) { process.stderr.write('ERROR: guard verification failed\n'); process.exit(1); }
+// --- PATCH9B: OOB email call site (occurrence 2) — add orgId ---
+const old9b = 'this.issuanceRepository.updateSchemaIdByThreadId(credentialCreateOfferDetails.response.credentialRequestThId, schemaId);';
+if (content.includes(old9b)) {
+  content = content.replace(old9b, 'this.issuanceRepository.updateSchemaIdByThreadId(credentialCreateOfferDetails.response.credentialRequestThId, schemaId, orgId); /*PATCH9B: orgId in OOB call*/');
+}
+
+// --- PATCH9B: fix createdBy/lastChangedBy if PATCH9 was applied without fallback ---
+if (content.includes('createdBy: orgId,')) {
+  content = content.replace('createdBy: orgId,', "createdBy: orgId || '00000000-0000-0000-0000-000000000000', /*PATCH9B: fallback UUID*/");
+}
+if (content.includes('lastChangedBy: orgId,')) {
+  content = content.replace('lastChangedBy: orgId,', "lastChangedBy: orgId || '00000000-0000-0000-0000-000000000000',");
+}
+
+if (!content.includes('PATCH9B: fallback UUID')) { process.stderr.write('ERROR: final guard verification failed\n'); process.exit(1); }
 fs.writeFileSync(path, content);
 process.stdout.write('patched\n');
 JSEOF

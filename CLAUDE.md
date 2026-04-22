@@ -179,7 +179,7 @@ CREDEBL's `agent-provisioning` spawns the Credo controller container via the Doc
 
 This is hardcoded in `init-credebl.sh` and the `docker-compose.yml` fallback default. Do not change to the VPS hostname/IP.
 
-### Seven required CREDEBL container patches (automated in init-credebl.sh)
+### Nine required CREDEBL container patches (automated in init-credebl.sh)
 
 These patches fix bugs in the published CREDEBL Docker images. `init-credebl.sh` applies them automatically via `apply_container_patches()` after every `docker compose up`. All are idempotent.
 
@@ -214,6 +214,10 @@ _Symptom if missing_: When SSL is enabled, platform-admin shared agent provision
 **Patch 5 — Issuance service @context triple-prefix (outOfBandCredentialOffer)**
 When Studio builds the OOB JSON-LD credential offer, it prepends `http://` to the schema URL again — now the `@context` array sent to Credo contains `"http://http://http://schema-file-server:4000/schemas/..."`. Credo rejects this with 400. Fix: insert a normalization loop after `this.logger.debug('Validated/Updated Issuance dates credential offer')` in `outOfBandCredentialOffer` that strips duplicate `://http` prefixes from every URL in `offer.credential['@context']`. Guard string: `ctx.map(function(url)`.
 _Symptom if missing_: Credential issuance returns `500 "Something went wrong!"` or `500 "Cannot read properties of undefined (reading 'status')"` — Credo returns 400 which becomes an unhandled error in the issuance service.
+
+**Patch 9 — Issuance service OOB credential not saved to DB (upsert + orgId fix)**
+In Credo multi-tenancy, credential state-change events fire on each TENANT agent's EventEmitter, not the root agent's. `CredentialEvents.js` only listens to the root agent — it never receives the `offer-sent` event for tenant-issued credentials, never POSTs the webhook, and `saveIssuedCredentialDetails` is never called. The `credentials` table stays empty despite successful email delivery. Fix (PATCH9): change `updateSchemaIdByThreadId` from `prisma.credentials.update` (throws P2025 "Record to update not found") to `prisma.credentials.upsert`, accepting `orgId` as an optional third parameter. Fix (PATCH9B): `createdBy` and `lastChangedBy` are non-nullable `@db.Uuid` fields with no default — passing `undefined` (when `orgId` is absent) throws `PrismaClientValidationError` → uncaughtException → service crash → "no subscribers" loop. Fixed by using a fallback UUID `'00000000-0000-0000-0000-000000000000'`. Also: the OOB email call site (occurrence 2 — `credentialCreateOfferDetails.response.credentialRequestThId`) was not passing `orgId` as the third argument; now patched to pass it. Guard strings: `PATCH9: oob credential upsert` (fn signature), `PATCH9B: fallback UUID` (final state indicator).
+_Symptom if missing_: Credential issuance succeeds (email arrives) but the credential list in Studio returns 500 "no subscribers" (from repeated issuance service crashes) and the `credentials` table stays empty.
 
 ### Platform-admin tenant wallet and DID creation (Patch — automated in init-credebl.sh)
 
