@@ -82,6 +82,22 @@ ask_yes_no() {
   done
 }
 
+print_banner() {
+  echo
+  printf '\033[1;36m'
+  cat <<'ASCII'
+   ____  ____  ____  ___
+  / ___||  _ \|  _ \|_ _|
+ | |    | | | || |_) || |
+ | |___ | |_| ||  __/ | |
+  \____||____/ |_|   |___|
+ASCII
+  printf '\033[0m'
+  echo "  Centre for Digital Public Infrastructure"
+  echo "  CREDEBL PoC Initializer"
+  echo
+}
+
 # Generate an HS256 JWT signed with JWT_TOKEN_SECRET for schema-file-server
 generate_hs256_jwt() {
   python3 - "$1" "$2" <<'PY'
@@ -1203,6 +1219,8 @@ run_ssl_setup() {
 # PREREQUISITE CHECKS
 # =============================================================================
 
+print_banner
+
 require_cmd docker
 require_cmd python3
 require_cmd openssl
@@ -1225,12 +1243,7 @@ fi
 # separate apply-patches.sh script — everything runs from this single entry point.
 
 if [ -f "$ENV_FILE" ]; then
-  echo
-  echo "============================================================"
-  echo " CDPI PoC — CREDEBL initializer"
-  echo "============================================================"
-  echo " Existing deployment found."
-  echo "============================================================"
+  echo "  Existing deployment found."
   echo
   if ask_yes_no "Re-apply container patches + refresh Credo JWT? (No = full re-initialization)" "Y"; then
     echo
@@ -1273,14 +1286,8 @@ fi
 # INTERACTIVE PROMPTS — 5 questions, 6-7 if SSL is requested
 # =============================================================================
 
-cat <<'BANNER'
-============================================================
- CDPI PoC — CREDEBL initializer
-============================================================
- Answers 5 questions. All secrets are auto-generated and
- printed in full at the end — save that report securely.
-============================================================
-BANNER
+echo "  Answers 5 questions. All secrets are auto-generated and"
+echo "  printed in full at the end — save that report securely."
 echo
 
 # 1. VPS host — autodetect with fallback
