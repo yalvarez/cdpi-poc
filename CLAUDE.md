@@ -1,7 +1,7 @@
 # CLAUDE.md — Project Context & Memory
 ## CDPI PoC Technical Repository
 
-**Last updated**: April 17, 2026  
+**Last updated**: April 21, 2026  
 **Purpose**: This file gives Claude complete context to continue working on this project without needing to re-explain everything. Read this first before any session.
 
 ---
@@ -53,7 +53,9 @@ cdpi-poc/
 ├── .gitignore
 ├── scripts/
 │   ├── setup-vps.sh               ← Ubuntu 22/24 VPS setup (Docker, firewall, swap)
-│   ├── init-credebl.sh            ← CREDEBL single-path initializer (4 questions → full deploy)
+│   ├── init-credebl.sh            ← CREDEBL single entry point: fresh deploy, patch recovery,
+│   │                                 SendGrid/Mailpit choice, SSL/nginx/certbot/Keycloak-HTTPS
+│   │                                 (5 interactive questions, 6-7 if SSL enabled)
 │   ├── health-check.sh            ← CREDEBL stack verification
 │   ├── health-check-inji.sh       ← INJI stack verification
 │   └── generate-inji-certs.sh     ← PKCS12 keystore for INJI (run once)
