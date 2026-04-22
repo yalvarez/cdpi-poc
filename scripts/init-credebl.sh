@@ -475,7 +475,7 @@ JSEOF
   docker exec --user root credebl-agent-service node /tmp/patch_agent_nu.js
 }
 
-ensure_sendgrid_from_address() {
+ensure_email_from_address() {
   # The FROM address used at email-send time is read from platform_config.emailFrom
   # in Postgres — NOT from the EMAIL_FROM env var. The seed populates this column
   # with whatever default it has compiled in (noreply@cdpi-poc.local), regardless
@@ -1450,8 +1450,8 @@ if [ -f "$ENV_FILE" ]; then
     PLATFORM_WALLET_NAME="$(_ev PLATFORM_WALLET_NAME)"
     PLATFORM_ADMIN_EMAIL="$(_ev PLATFORM_ADMIN_EMAIL)"
     VPS_HOST="$(_ev VPS_IP)"          # written as VPS_IP in .env
-    USE_SENDGRID=false
-    [ "$(_ev EMAIL_PROVIDER)" = "sendgrid" ] && USE_SENDGRID=true
+    EMAIL_PROVIDER_CHOICE="$(_ev EMAIL_PROVIDER)"
+    [ "$EMAIL_PROVIDER_CHOICE" = "smtp" ] && EMAIL_PROVIDER_CHOICE="mailpit"
     EMAIL_FROM_VAL="$(_ev EMAIL_FROM)"
 
     cd "$CREDEBL_DIR"
@@ -1465,7 +1465,8 @@ if [ -f "$ENV_FILE" ]; then
 
     ensure_platform_admin_tenant
 
-    [ "$USE_SENDGRID" = "true" ] && ensure_sendgrid_from_address
+    [ "$EMAIL_PROVIDER_CHOICE" = "sendgrid" ] && ensure_email_from_address
+    [ "$EMAIL_PROVIDER_CHOICE" = "brevo" ]    && ensure_email_from_address
 
     echo
     bash "$SCRIPT_DIR/health-check.sh"
@@ -1524,18 +1525,51 @@ if ask_yes_no "Enable HTTPS with Let's Encrypt certificates?" "N"; then
 fi
 
 # 5. Email provider
-USE_SENDGRID=false
+EMAIL_PROVIDER_CHOICE="mailpit"
 SENDGRID_API_KEY_VAL="SG.mock-not-used"
 EMAIL_FROM_VAL="noreply@cdpi-poc.local"
-if ask_yes_no "Send real emails via SendGrid? (No = capture all emails locally with Mailpit)" "N"; then
-  USE_SENDGRID=true
-  while true; do
-    SENDGRID_API_KEY_VAL="$(ask "SendGrid API key (must start with SG.)")"
-    [[ "$SENDGRID_API_KEY_VAL" == SG.* ]] && break
-    echo "  Error: key must start with 'SG.' — try again." >&2
-  done
-  EMAIL_FROM_VAL="$(ask "From address (must be a verified SendGrid sender)" "noreply@cdpi-poc.local")"
-fi
+SMTP_HOST_VAL="mailpit"
+SMTP_PORT_VAL="1025"
+SMTP_USER_VAL="mailpit"
+SMTP_PASS_VAL="mailpit"
+SMTP_SECURE_VAL="false"
+
+echo >&2
+echo "  Email provider options:" >&2
+echo "    1) Mailpit  — capture all emails locally, no real sending (default for PoC testing)" >&2
+echo "    2) SendGrid — send real emails via SendGrid API (requires verified API key)" >&2
+echo "    3) Brevo    — send real emails via Brevo SMTP relay (300/day free, no domain needed)" >&2
+EMAIL_CHOICE=""
+while true; do
+  EMAIL_CHOICE="$(ask "Email provider [1/2/3]" "1")"
+  [[ "$EMAIL_CHOICE" =~ ^[123]$ ]] && break
+  echo "  Enter 1, 2, or 3." >&2
+done
+
+case "$EMAIL_CHOICE" in
+  2)
+    EMAIL_PROVIDER_CHOICE="sendgrid"
+    while true; do
+      SENDGRID_API_KEY_VAL="$(ask "SendGrid API key (must start with SG.)")"
+      [[ "$SENDGRID_API_KEY_VAL" == SG.* ]] && break
+      echo "  Error: key must start with 'SG.' — try again." >&2
+    done
+    EMAIL_FROM_VAL="$(ask "From address (must be a verified SendGrid sender)" "noreply@cdpi-poc.local")"
+    SMTP_HOST_VAL=""
+    SMTP_PORT_VAL=""
+    SMTP_USER_VAL=""
+    SMTP_PASS_VAL=""
+    ;;
+  3)
+    EMAIL_PROVIDER_CHOICE="brevo"
+    EMAIL_FROM_VAL="$(ask "From address (your Brevo account email or verified sender)" "noreply@cdpi-poc.local")"
+    SMTP_USER_VAL="$(ask "Brevo SMTP login (your Brevo account email)")"
+    SMTP_PASS_VAL="$(ask "Brevo SMTP master key" "" "true")"
+    SMTP_HOST_VAL="smtp-relay.brevo.com"
+    SMTP_PORT_VAL="587"
+    SMTP_SECURE_VAL="false"
+    ;;
+esac
 
 # =============================================================================
 # GENERATE ALL SECRETS
@@ -1642,7 +1676,8 @@ export ENV_TEMPLATE ENV_FILE MASTER_TABLE \
   PLATFORM_ADMIN_EMAIL VPS_HOST VPS_PUBLIC_HOST KEYCLOAK_HOST PROTOCOL \
   KEYCLOAK_DOMAIN_INTERNAL KEYCLOAK_ADMIN_URL_INTERNAL KEYCLOAK_PUBLIC_URL \
   STUDIO_URL API_ENDPOINT PLATFORM_WEB_URL SOCKET_HOST ENABLE_CORS_IP_LIST DEEPLINK_DOMAIN \
-  USE_SENDGRID SENDGRID_API_KEY_VAL EMAIL_FROM_VAL
+  EMAIL_PROVIDER_CHOICE SENDGRID_API_KEY_VAL EMAIL_FROM_VAL \
+  SMTP_HOST_VAL SMTP_PORT_VAL SMTP_USER_VAL SMTP_PASS_VAL SMTP_SECURE_VAL
 
 python3 <<'PY'
 import json, os, re
@@ -1719,16 +1754,18 @@ replacements = {
     # SHORTENED_URL_DOMAIN is intentionally empty — utility service builds /default/{uuid}
     # which gets concatenated directly onto DEEPLINK_DOMAIN
     "SHORTENED_URL_DOMAIN":             "",
-    # Email provider — smtp routes through Mailpit (no external calls), sendgrid uses real API
-    "EMAIL_PROVIDER":                   "sendgrid" if e("USE_SENDGRID") == "true" else "smtp",
-    "SENDGRID_API_KEY":                 e("SENDGRID_API_KEY_VAL"),
-    "EMAIL_FROM":                       e("EMAIL_FROM_VAL"),
-    # SMTP settings are only active when EMAIL_PROVIDER=smtp (Mailpit mode)
-    "SMTP_HOST":                        "mailpit" if e("USE_SENDGRID") != "true" else "",
-    "SMTP_PORT":                        "1025"    if e("USE_SENDGRID") != "true" else "",
-    "SMTP_USER":                        "mailpit" if e("USE_SENDGRID") != "true" else "",
-    "SMTP_PASS":                        "mailpit" if e("USE_SENDGRID") != "true" else "",
-    "SMTP_SECURE":                      "false",
+    # Email provider:
+    #   sendgrid → EMAIL_PROVIDER=sendgrid, real SendGrid API
+    #   brevo    → EMAIL_PROVIDER=smtp, SMTP relay via smtp-relay.brevo.com:587
+    #   mailpit  → EMAIL_PROVIDER=smtp, local capture via mailpit:1025
+    "EMAIL_PROVIDER":  "sendgrid" if e("EMAIL_PROVIDER_CHOICE") == "sendgrid" else "smtp",
+    "SENDGRID_API_KEY": e("SENDGRID_API_KEY_VAL"),
+    "EMAIL_FROM":       e("EMAIL_FROM_VAL"),
+    "SMTP_HOST":        e("SMTP_HOST_VAL"),
+    "SMTP_PORT":        e("SMTP_PORT_VAL"),
+    "SMTP_USER":        e("SMTP_USER_VAL"),
+    "SMTP_PASS":        e("SMTP_PASS_VAL"),
+    "SMTP_SECURE":      e("SMTP_SECURE_VAL"),
     "MOBILE_APP":                       '"Inji Wallet"',
     "MOBILE_APP_NAME":                  '"Inji Wallet"',
     "MOBILE_APP_DOWNLOAD_URL":          "https://inji.mosip.io",
@@ -1891,9 +1928,10 @@ patch_credo_proof_events
 
 ensure_platform_admin_tenant
 
-# When using SendGrid, the seed populates platform_config.emailFrom with a default
-# value that won't be accepted by SendGrid (unverified domain). Update it now.
-[ "$USE_SENDGRID" = "true" ] && ensure_sendgrid_from_address
+# For real email providers (SendGrid, Brevo), the seed populates platform_config.emailFrom
+# with a default value that won't pass sender verification. Update it to EMAIL_FROM_VAL now.
+[ "$EMAIL_PROVIDER_CHOICE" = "sendgrid" ] && ensure_email_from_address
+[ "$EMAIL_PROVIDER_CHOICE" = "brevo" ]    && ensure_email_from_address
 
 # Grant 'owner' org role to platform admin so org-scoped endpoints pass the
 # OrgRolesGuard. CREDEBL's guard on GET /orgs/:orgId and POST /orgs/:orgId/agents/wallet
