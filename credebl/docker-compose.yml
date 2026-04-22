@@ -686,7 +686,7 @@ services:
         : "${WALLET_STORAGE_PASSWORD:?WALLET_STORAGE_PASSWORD is required}";
         : "${SOCKET_HOST:?SOCKET_HOST is required}";
         : "${AFJ_VERSION:?AFJ_VERSION is required}";
-        sleep 10 && node dist/apps/agent-service/main.js
+        sleep 30 && node dist/apps/agent-service/main.js
       '
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

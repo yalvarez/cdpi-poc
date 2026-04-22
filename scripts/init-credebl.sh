@@ -728,35 +728,87 @@ ensure_platform_admin_shared_agent() {
     return 1
   fi
 
+  # Check if already ready on first pass (happy path — fresh deploy with no prior failures).
+  if platform_admin_shared_agent_ready; then
+    echo "Platform-admin shared agent is ready."
+    return 0
+  fi
+
+  # Before entering the retry loop: the initial docker compose up may have already
+  # spawned a Credo container that is healthy but whose endpoint was never written to
+  # the DB (the NATS response was lost because agent-service started too fast). Check
+  # for that orphan first — if it's responding, patch the DB and skip a full re-provision.
+  echo "  Initial check failed. Looking for an orphan Credo container from the first attempt..."
+  local orphan_wait=0
+  while [ "$orphan_wait" -lt 120 ]; do
+    if recover_orphan_running_agent && platform_admin_shared_agent_ready; then
+      echo "Platform-admin shared agent is ready (recovered orphan from initial attempt)."
+      return 0
+    fi
+    sleep 15
+    orphan_wait=$((orphan_wait + 15))
+    echo "  Waiting for Credo to become responsive... (${orphan_wait}s / 120s)"
+  done
+
   local attempt=1
-  while [ "$attempt" -le 12 ]; do
+  while [ "$attempt" -le 6 ]; do
+    echo "  Not ready yet (attempt $attempt/6). Clearing stale state and restarting..."
+    clear_stale_platform_admin_agent || true
+    purge_stale_credo_containers
+    docker compose up -d cloud-wallet >/dev/null
+
+    # Fix NATS race: restart agent-provisioning first and wait until it has registered
+    # its 'wallet-provisioning' subscription before starting agent-service.
+    # Without this sequencing, agent-service calls NATS ~12s after start, but
+    # agent-provisioning doesn't connect until ~17s — NATS returns "No Responders"
+    # immediately and the provisioning attempt fails silently ({} error).
+    echo "  Restarting agent-provisioning and waiting for NATS subscription..."
+    docker compose restart agent-provisioning >/dev/null
+    local nats_wait=0
+    while [ "$nats_wait" -lt 45 ]; do
+      sleep 5
+      nats_wait=$((nats_wait + 5))
+      if docker compose logs --since 45s agent-provisioning 2>/dev/null \
+          | grep -q "Microservice is listening"; then
+        echo "  agent-provisioning is listening on NATS (${nats_wait}s)."
+        break
+      fi
+    done
+
+    echo "  Starting agent-service..."
+    docker compose restart agent-service >/dev/null
+
+    # Full provision cycle: agent-service NestJS startup (~10s) + NATS call +
+    # docker_start_agent.sh shell script (~60s fixed wait) + Credo init (~60s).
+    echo "  Waiting 130s for full provisioning cycle (shell script + Credo startup)..."
+    sleep 130
+
+    # Check DB first; if status=2 and endpoint set, also verify Credo responds.
     if platform_admin_shared_agent_ready; then
       echo "Platform-admin shared agent is ready."
       return 0
     fi
 
-    echo "  Not ready yet (attempt $attempt/12). Clearing stale state and restarting..."
-    clear_stale_platform_admin_agent || true
-    purge_stale_credo_containers
-    docker compose up -d cloud-wallet >/dev/null
-    docker compose restart agent-provisioning agent-service >/dev/null
-    # The full provision cycle takes ~40s: Nest startup + Prisma migrate + wallet init + agent start.
-    # Waiting only 10s means we restart again before the previous attempt finishes, making it worse.
-    echo "  Waiting 50s for provisioning cycle to complete..."
-    sleep 50
+    # Credo may still be initializing — give it up to 90s more before giving up on this attempt.
+    local extra=0
+    while [ "$extra" -lt 90 ]; do
+      sleep 15
+      extra=$((extra + 15))
+      if recover_orphan_running_agent && platform_admin_shared_agent_ready; then
+        echo "Platform-admin shared agent is ready (recovered after retry $attempt)."
+        return 0
+      fi
+      if platform_admin_shared_agent_ready; then
+        echo "Platform-admin shared agent is ready."
+        return 0
+      fi
+      echo "  Still waiting for Credo... (${extra}s extra)"
+    done
+
     attempt=$((attempt + 1))
   done
 
-  # All retries exhausted. The Credo container may be running but the endpoint was never
-  # written to the DB (race condition: agent-service restarted mid-NATS response). Try
-  # to recover by detecting and patching the orphan container before giving up.
-  echo "  Retries exhausted. Attempting orphan-container recovery..."
-  if recover_orphan_running_agent && platform_admin_shared_agent_ready; then
-    echo "Platform-admin shared agent is ready (recovered from orphan container)."
-    return 0
-  fi
-
-  echo "Error: platform-admin shared agent did not reach ready state." >&2
+  echo "Error: platform-admin shared agent did not reach ready state after all attempts." >&2
   echo "Inspect with: docker compose logs --tail=200 agent-service agent-provisioning" >&2
   return 1
 }
