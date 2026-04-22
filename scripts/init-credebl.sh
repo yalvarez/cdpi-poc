@@ -173,7 +173,8 @@ patch_utility_s3() {
   # AWS SDK v2 does NOT read AWS_ENDPOINT from environment automatically.
   # Without this patch, S3 calls from the utility service go to real AWS
   # and fail with "The AWS Access Key Id you provided does not exist".
-  # We add endpoint + s3ForcePathStyle:true to all three S3 client constructors.
+  # We inject endpoint + s3ForcePathStyle:true into every new aws_sdk_1.S3({
+  # constructor via marker-based insertion (robust against whitespace changes).
   # Uses docker cp + --user root because the process runs as uid=1001 (read-only /app).
   local patch_script
   patch_script="$(mktemp /tmp/patch_utility_XXXXXX.js)"
@@ -182,22 +183,19 @@ const fs = require('fs');
 const path = '/app/dist/apps/utility/main.js';
 let content = fs.readFileSync(path, 'utf8');
 if (content.includes('s3ForcePathStyle')) { process.stdout.write('already patched\n'); process.exit(0); }
-content = content
-  .replace(
-    'region: process.env.AWS_REGION\n        });',
-    'region: process.env.AWS_REGION,\n            endpoint: process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        });'
-  )
-  .replace(
-    'region: process.env.AWS_PUBLIC_REGION\n        });',
-    'region: process.env.AWS_PUBLIC_REGION,\n            endpoint: process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        });'
-  )
-  .replace(
-    'region: process.env.AWS_S3_STOREOBJECT_REGION\n        });',
-    'region: process.env.AWS_S3_STOREOBJECT_REGION,\n            endpoint: process.env.AWS_S3_STOREOBJECT_ENDPOINT || process.env.AWS_ENDPOINT,\n            s3ForcePathStyle: true\n        });'
-  );
-if (!content.includes('s3ForcePathStyle')) { process.stderr.write('ERROR: patch pattern not found — CREDEBL image may have changed\n'); process.exit(1); }
+const marker = 'new aws_sdk_1.S3({';
+let count = 0;
+let idx = 0;
+while ((idx = content.indexOf(marker, idx)) >= 0) {
+  const insertAt = idx + marker.length;
+  const inject = 'endpoint:process.env.AWS_ENDPOINT,s3ForcePathStyle:true,';
+  content = content.substring(0, insertAt) + inject + content.substring(insertAt);
+  idx = insertAt + inject.length;
+  count++;
+}
+if (count === 0) { process.stderr.write('ERROR: aws_sdk_1.S3 constructor not found — CREDEBL image may have changed\n'); process.exit(1); }
 fs.writeFileSync(path, content);
-process.stdout.write('patched\n');
+process.stdout.write('patched (' + count + ' occurrences)\n');
 JSEOF
   docker cp "$patch_script" credebl-utility:/tmp/patch_utility.js
   rm -f "$patch_script"
@@ -387,13 +385,14 @@ patch_issuance_context_urls() {
 const fs = require('fs');
 const path = '/app/dist/apps/issuance/main.js';
 let content = fs.readFileSync(path, 'utf8');
-if (content.includes('ctx.map(function(url)')) { process.stdout.write('already patched\n'); process.exit(0); }
+if (content.includes('_ctx.map(function(url)')) { process.stdout.write('already patched\n'); process.exit(0); }
 const target = "'Validated/Updated Issuance dates credential offer'";
 const idx = content.indexOf(target);
 if (idx < 0) { process.stderr.write('ERROR: patch target not found in issuance/main.js\n'); process.exit(1); }
 // Insert normalization right after the logger.debug call's closing semicolon
 const insertAfter = content.indexOf(';', idx) + 1;
-const normCode = ' if (credentialOffer) { for (const offer of credentialOffer) { const ctx = offer && offer.credential && offer.credential["@context"]; if (Array.isArray(ctx)) { offer.credential["@context"] = ctx.map(function(url) { while (typeof url === "string" && url.indexOf("://http") > 0) { url = url.slice(url.indexOf("://") + 3); } return url; }); } } }';
+const normCode = ' if(credentialOffer){for(const _co of credentialOffer){const _ctx=_co&&_co.credential&&_co.credential["@context"];if(Array.isArray(_ctx)){_co.credential["@context"]=_ctx.map(function(url){while(typeof url==="string"&&url.indexOf("://http")>0){url=url.slice(url.indexOf("://")+3);}return url;});}}}';
+
 content = content.substring(0, insertAfter) + normCode + content.substring(insertAfter);
 fs.writeFileSync(path, content);
 process.stdout.write('patched\n');
@@ -481,10 +480,10 @@ ensure_email_from_address() {
   # with whatever default it has compiled in (noreply@cdpi-poc.local), regardless
   # of what EMAIL_FROM is set to in .env.
   #
-  # For SendGrid to accept the outbound email, emailFrom MUST be a verified sender
-  # address in the SendGrid account. This function updates the DB row directly.
+  # For real email providers (SendGrid, Brevo), emailFrom MUST be a verified sender
+  # address in the account. This function updates the DB row directly.
   echo
-  echo "Updating platform_config.emailFrom for SendGrid..."
+  echo "Updating platform_config.emailFrom..."
   local current
   current="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
     psql -U credebl -d credebl -Atqc 'SELECT "emailFrom" FROM platform_config LIMIT 1;' \
