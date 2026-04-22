@@ -406,6 +406,34 @@ JSEOF
   docker exec --user root credebl-agent-service node /tmp/patch_agent_ct.js
 }
 
+ensure_sendgrid_from_address() {
+  # The FROM address used at email-send time is read from platform_config.emailFrom
+  # in Postgres — NOT from the EMAIL_FROM env var. The seed populates this column
+  # with whatever default it has compiled in (noreply@cdpi-poc.local), regardless
+  # of what EMAIL_FROM is set to in .env.
+  #
+  # For SendGrid to accept the outbound email, emailFrom MUST be a verified sender
+  # address in the SendGrid account. This function updates the DB row directly.
+  echo
+  echo "Updating platform_config.emailFrom for SendGrid..."
+  local current
+  current="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -Atqc 'SELECT "emailFrom" FROM platform_config LIMIT 1;' \
+    2>/dev/null | tr -d '\r')"
+  if [ "$current" = "$EMAIL_FROM_VAL" ]; then
+    echo "  emailFrom already set to: ${EMAIL_FROM_VAL} — skipping."
+    return 0
+  fi
+  docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -v ON_ERROR_STOP=1 -c \
+    "UPDATE platform_config SET \"emailFrom\" = '${EMAIL_FROM_VAL}';" >/dev/null
+  echo "  platform_config.emailFrom updated: ${current} → ${EMAIL_FROM_VAL}"
+  # Restart user + issuance so any in-memory cached config is invalidated
+  docker compose restart user issuance >/dev/null
+  sleep 10
+  echo "  User and issuance services restarted."
+}
+
 ensure_brand_logo() {
   # Upload CREDEBL logo to MinIO orgLogos/ and set BRAND_LOGO in .env.
   # The issuance email template uses BRAND_LOGO for the header image.
@@ -1236,6 +1264,10 @@ echo -n "  Patching Credo ProofEvents (post-agent-spawn): "
 patch_credo_proof_events
 
 ensure_platform_admin_tenant
+
+# When using SendGrid, the seed populates platform_config.emailFrom with a default
+# value that won't be accepted by SendGrid (unverified domain). Update it now.
+[ "$USE_SENDGRID" = "true" ] && ensure_sendgrid_from_address
 
 # Grant 'owner' org role to platform admin so org-scoped endpoints pass the
 # OrgRolesGuard. CREDEBL's guard on GET /orgs/:orgId and POST /orgs/:orgId/agents/wallet
