@@ -455,7 +455,7 @@ ensure_brand_logo() {
   docker exec credebl-minio mc cp /tmp/credebl-logo-upload.png \
     cdpi/credebl-bucket/orgLogos/credebl-logo.png 2>/dev/null
   rm -f /tmp/credebl-logo-upload.png
-  LOGO_URL="http://${VPS_IP}:9000/credebl-bucket/orgLogos/credebl-logo.png"
+  LOGO_URL="http://${VPS_HOST}:9000/credebl-bucket/orgLogos/credebl-logo.png"
   printf '\n# Email branding — set by init-credebl.sh\nBRAND_LOGO=%s\nIOS_DOWNLOAD_LINK=https://apps.apple.com/in/app/inji-wallet/id1631979601\n' "$LOGO_URL" >> "$ENV_FILE"
   echo "  Logo available at: $LOGO_URL"
   echo "  BRAND_LOGO and IOS_DOWNLOAD_LINK added to .env — restarting issuance..."
@@ -846,14 +846,14 @@ fi
 [ -f "$MASTER_TABLE" ]  || { echo "Error: seed config not found at $MASTER_TABLE" >&2; exit 1; }
 
 # =============================================================================
-# INTERACTIVE PROMPTS — 4 questions, 5 if SSL is requested
+# INTERACTIVE PROMPTS — 5 questions, 6-7 if SSL is requested
 # =============================================================================
 
 cat <<'BANNER'
 ============================================================
  CDPI PoC — CREDEBL initializer
 ============================================================
- Answers 4 questions. All secrets are auto-generated and
+ Answers 5 questions. All secrets are auto-generated and
  printed in full at the end — save that report securely.
 ============================================================
 BANNER

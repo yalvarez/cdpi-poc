@@ -78,6 +78,28 @@ process.stdout.write('patched\n');
 echo -n "  -> restart issuance: "
 docker restart credebl-issuance > /dev/null 2>&1 && echo "ok"
 
+# ---------- Patch 6: agent-service create-tenant uses root JWT ----------
+# Uses docker cp + temp file to avoid shell escaping issues with backtick template literals.
+echo -n "Patch 6 (agent-service create-tenant root JWT): "
+PATCH6_TMP=$(mktemp /tmp/patch6_XXXXXX.js)
+cat > "$PATCH6_TMP" << 'JSEOF'
+var fs=require('fs');
+var p='/app/dist/apps/agent-service/main.js';
+var c=fs.readFileSync(p,'utf8');
+if(c.includes('PATCH: create-tenant needs root JWT')){process.stdout.write('already patched\n');process.exit(0);}
+var t='const tenantDetails = await this.commonService.httpPost(`${endpoint}${common_constant_1.CommonConstants.URL_SHAGENT_CREATE_TENANT}`, createTenantOptions, { headers: { authorization: agentApiKey } });\n        return tenantDetails;\n    }\n    async handleCreateDid';
+if(!c.includes(t)){process.stderr.write('target not found\n');process.exit(1);}
+var r='const rootTokenResp = await this.commonService.httpPost(endpoint + "/agent/token", {}, { headers: { authorization: process.env.AGENT_API_KEY } }); // PATCH: create-tenant needs root JWT\n        const rootJwt = "Bearer " + ((rootTokenResp && rootTokenResp.token) || (rootTokenResp && rootTokenResp.access_token) || "");\n        const tenantDetails = await this.commonService.httpPost(`${endpoint}${common_constant_1.CommonConstants.URL_SHAGENT_CREATE_TENANT}`, createTenantOptions, { headers: { authorization: rootJwt } });\n        return tenantDetails;\n    }\n    async handleCreateDid';
+c=c.replace(t,r);
+fs.writeFileSync(p,c);
+process.stdout.write('patched\n');
+JSEOF
+docker cp "$PATCH6_TMP" credebl-agent-service:/tmp/patch6.js
+rm -f "$PATCH6_TMP"
+docker exec --user root credebl-agent-service node /tmp/patch6.js 2>&1
+echo -n "  -> restart agent-service: "
+docker restart credebl-agent-service > /dev/null 2>&1 && echo "ok"
+
 # ---------- Patch 3: Credo CredentialEvents ----------
 CREDO=$(docker ps --format '{{.Names}}' | grep -v '^credebl-' | head -1)
 echo "  Credo container: $CREDO"
@@ -126,3 +148,4 @@ docker exec credebl-api-gateway node -e "var c=require('fs').readFileSync('/app/
 docker exec credebl-issuance node -e "var c=require('fs').readFileSync('/app/dist/apps/issuance/main.js','utf8');process.stdout.write('Patch4: '+(c.includes('PATCH: schema URL dedup')?'OK':'MISSING')+' Patch5: '+(c.includes('ctx.map(function(url)')?'OK':'MISSING')+'\n');" 2>/dev/null
 docker exec "$CREDO" node -e "var c=require('fs').readFileSync('/app/build/events/CredentialEvents.js','utf8');process.stdout.write('Patch3: '+((c.includes('credentials try-catch guard')||c.includes('getFormatData unavailable'))?'OK':'MISSING')+'\n');" 2>/dev/null
 docker exec "$CREDO" node -e "var c=require('fs').readFileSync('/app/build/events/ProofEvents.js','utf8');process.stdout.write('Patch7: '+(c.includes('proofData try-catch guard')?'OK':'MISSING')+'\n');" 2>/dev/null
+docker exec credebl-agent-service node -e "var c=require('fs').readFileSync('/app/dist/apps/agent-service/main.js','utf8');process.stdout.write('Patch6: '+(c.includes('PATCH: create-tenant needs root JWT')?'OK':'MISSING')+'\n');" 2>/dev/null
