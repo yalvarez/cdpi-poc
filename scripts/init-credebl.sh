@@ -206,8 +206,15 @@ JSEOF
 
 patch_api_gateway_context_validator() {
   # IsCredentialJsonLdContext validator calls isURL(v) with default require_tld:true.
-  # This rejects Docker-internal hostnames like schema-file-server (no TLD).
-  # Adding require_tld:false allows internal hostnames in @context arrays.
+  # Two fixes applied together:
+  # 1. require_tld:false — allows Docker-internal hostnames (schema-file-server has no TLD).
+  # 2. URL normalization — Studio prepends http:// even when the schemaLedgerId already
+  #    starts with http://, producing "http://http://schema-file-server:..." which is
+  #    structurally invalid and fails isURL even with require_tld:false. We strip the
+  #    duplicate prefix before validating using string indexOf (no regex — regex literals
+  #    in patched bundles lose backslashes and produce SyntaxError on restart).
+  #
+  # Guard string: "PATCH2: require_tld+normalize"
   #
   # Implementation notes:
   # - The api-gateway process runs as uid=1001 (nextjs), not root — cannot write to /app.
@@ -220,15 +227,17 @@ patch_api_gateway_context_validator() {
 const fs = require('fs');
 const path = '/app/dist/apps/api-gateway/main.js';
 let content = fs.readFileSync(path, 'utf8');
-const target = '(0, class_validator_1.isURL)(v)';
-const replacement = '(0, class_validator_1.isURL)(v, { require_tld: false })';
+if (content.includes('PATCH2: require_tld+normalize')) { process.stdout.write('already patched\n'); process.exit(0); }
 // Find the FUNCTION DEFINITION — the decorator usage appears ~33k chars earlier in the bundle
 // so we must anchor to 'function IsCredentialJsonLdContext', not just 'IsCredentialJsonLdContext'.
 const funcIdx = content.indexOf('function IsCredentialJsonLdContext');
 if (funcIdx < 0) { process.stderr.write('ERROR: function IsCredentialJsonLdContext not found\n'); process.exit(1); }
+const target = '(0, class_validator_1.isURL)(v)';
 const after = content.indexOf(target, funcIdx);
-// The isURL call is ~500 chars after the function definition
-if (after < 0 || after > funcIdx + 1000) { process.stdout.write('already patched\n'); process.exit(0); }
+if (after < 0 || after > funcIdx + 1000) { process.stderr.write('ERROR: isURL(v) call not found near function\n'); process.exit(1); }
+// Replace isURL(v) with: normalize v (strip duplicate http:// prefix), then validate.
+// Uses only string operations — no regex literals (they lose backslashes in bundles).
+const replacement = '/*PATCH2: require_tld+normalize*/(function(u){while(u&&u.indexOf("://http")>0){u=u.slice(u.indexOf("://http")+3);}return (0,class_validator_1.isURL)(u,{require_tld:false});})(v)';
 content = content.substring(0, after) + replacement + content.substring(after + target.length);
 fs.writeFileSync(path, content);
 process.stdout.write('patched\n');
