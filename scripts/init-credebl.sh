@@ -1863,9 +1863,9 @@ replacements = {
     "SMTP_USER":        e("SMTP_USER_VAL"),
     "SMTP_PASS":        e("SMTP_PASS_VAL"),
     "SMTP_SECURE":      e("SMTP_SECURE_VAL"),
-    "MOBILE_APP":                       '"Inji Wallet"',
-    "MOBILE_APP_NAME":                  '"Inji Wallet"',
-    "MOBILE_APP_DOWNLOAD_URL":          "https://inji.mosip.io",
+    "MOBILE_APP":                       '"PoC Wallet"',
+    "MOBILE_APP_NAME":                  '"PoC Wallet"',
+    "MOBILE_APP_DOWNLOAD_URL":          "https://wallet.bootcamp.cdpi.dev",
     "PLAY_STORE_DOWNLOAD_LINK":         "https://play.google.com/store/apps/details?id=io.mosip.residentapp",
 }
 
