@@ -178,7 +178,7 @@ CREDEBL's `agent-provisioning` spawns the Credo controller container via the Doc
 - `172.17.0.1` — the `docker0` bridge gateway; always reachable from any default-bridge container; routes to the host where port 5432 is published on `0.0.0.0`
 
 This is hardcoded in `init-credebl.sh` and the `docker-compose.yml` fallback default. Do not change to the VPS hostname/IP.
-
+ 
 ### Ten required CREDEBL container patches (automated in init-credebl.sh)
 
 These patches fix bugs in the published CREDEBL Docker images. `init-credebl.sh` applies them automatically via `apply_container_patches()` after every `docker compose up`. All are idempotent.
