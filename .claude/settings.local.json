@@ -14,7 +14,28 @@
       "Bash(curl -s \"https://api.github.com/repos/credebl/platform/contents/libs/common/src/response-messages\")",
       "Bash(python3 -c \" import json,sys try: data=json.load\\(sys.stdin\\) if isinstance\\(data, list\\): [print\\(f['name']\\) for f in data if 'name' in f] else: print\\(data\\) \")",
       "Bash(scp c:/Users/yalva/source/repos/cdpi-poc/scripts/init-credebl.sh root@cdpi-vps:/home/apps/cdpi-poc/scripts/init-credebl.sh)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no root@cdpi-vps \"echo connected && pwd\")",
+      "Bash(echo \"exit: $?\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"find /root -name 'api-test*.sh' 2>/dev/null; echo '---'; ls /root/cdpi-poc/ 2>/dev/null || ls /root/ 2>/dev/null | head -30\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"ls /root/ && find /root -maxdepth 3 -name '*.sh' 2>/dev/null | head -20\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"ls -la /root/ 2>&1; echo EXIT:$?\")",
+      "Bash(grep -v '^$')",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"curl -s 'https://api.github.com/repos/credebl/platform/pulls?state=all&per_page=10&page=1' | python3 -c \\\\\"import sys,json; prs=json.load\\(sys.stdin\\); [print\\(p['number'], p['state'], p.get\\('merged_at',''\\), p['title'][:80]\\) for p in prs]\\\\\" 2>&1\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"curl -s 'https://api.github.com/repos/credebl/platform/issues/1279' | python3 -c \\\\\"import sys,json; d=json.load\\(sys.stdin\\); print\\('Type:', 'PR' if 'pull_request' in d else 'Issue'\\); print\\('Title:', d.get\\('title'\\)\\); print\\('State:', d.get\\('state'\\)\\); print\\('ClosedAt:', d.get\\('closed_at'\\)\\)\\\\\"\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"curl -s 'https://api.github.com/repos/credebl/platform/pulls?state=all&per_page=100&page=1' | python3 -c \\\\\"import sys,json; prs=json.load\\(sys.stdin\\); matches=[p for p in prs if 'sdjwt' in p['title'].lower\\(\\) or 'sd-jwt' in p['title'].lower\\(\\) or 'sd_jwt' in p['title'].lower\\(\\) or 'sdjwt' in p.get\\('head',{}\\).get\\('ref',''\\).lower\\(\\)]; [print\\(p['number'], p['state'], p.get\\('merged_at',''\\), p['title'][:80]\\) for p in matches]\\\\\"\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"docker exec credebl-issuance grep -r 'sdjwt\\\\|sd_jwt\\\\|SD_JWT\\\\|credentialType' /app/dist/apps/issuance/main.js 2>/dev/null | grep -i 'sdjwt\\\\|invalid credential' | head -20\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"docker inspect credebl-issuance --format '{{.Config.Image}}'; docker inspect credebl-issuance --format '{{index .Config.Labels \\\\\"org.opencontainers.image.version\\\\\"}}'; docker inspect credebl-issuance --format '{{.Config.Labels}}'\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"docker exec credebl-issuance cat /app/package.json 2>/dev/null | python3 -c \\\\\"import sys,json; d=json.load\\(sys.stdin\\); print\\('version:', d.get\\('version'\\)\\); print\\('name:', d.get\\('name'\\)\\)\\\\\" 2>/dev/null; echo '---'; docker exec credebl-issuance node -e \\\\\"const fs=require\\('fs'\\); const b=fs.readFileSync\\('/app/dist/apps/issuance/main.js','utf8'\\); const i=b.indexOf\\('invalid credential type'\\); console.log\\(i>-1 ? b.substring\\(Math.max\\(0,i-200\\), i+200\\) : 'NOT FOUND'\\)\\\\\" 2>/dev/null\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps 'docker exec credebl-issuance node -e \" *)",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps 'docker exec credebl-api-gateway node -e \" *)",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"curl -s 'https://api.github.com/repos/credebl/platform/releases?per_page=5' | python3 -c \\\\\"import sys,json; releases=json.load\\(sys.stdin\\); [print\\(r['tag_name'], r['published_at'], r['name'][:60]\\) for r in releases]\\\\\"\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"docker pull ghcr.io/credebl/api-gateway:latest 2>&1 | tail -5\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps \"docker pull ghcr.io/credebl/issuance:latest 2>&1 | tail -5\")",
+      "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps ' *)",
+      "Bash(mkdir -p \"c:/Users/yalva/source/repos/cdpi-poc/helm/credebl/templates/infra\")",
+      "Bash(mkdir -p \"c:/Users/yalva/source/repos/cdpi-poc/helm/credebl/templates/jobs\")",
+      "Bash(mkdir -p \"c:/Users/yalva/source/repos/cdpi-poc/helm/credebl/templates/services\")"
     ]
   }
 }

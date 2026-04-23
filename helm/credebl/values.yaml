@@ -1,0 +1,310 @@
+# =============================================================================
+# CREDEBL Helm Chart — Default Values
+# =============================================================================
+# This file contains all knobs for a fully self-contained PoC deployment.
+# For production, override with values-production.yaml:
+#   helm install credebl ./credebl -f values-production.yaml
+# =============================================================================
+
+# ─── Global ──────────────────────────────────────────────────────────────────
+global:
+  # Base domain — used to derive Ingress hostnames automatically.
+  # api.{domain}, studio.{domain}, auth.{domain}, schemas.{domain}
+  domain: "credebl.example.com"
+
+  imageRegistry: ghcr.io/credebl
+  imageTag: "latest"
+  imagePullPolicy: IfNotPresent
+
+  # Ingress controller external IP (or hostname).
+  # Services that store their own URL in the DB (api-gateway, agent-service)
+  # use hostAliases so internal calls to the public domain resolve correctly
+  # within the cluster. Set to your LoadBalancer IP or Ingress NGINX external IP.
+  ingressIP: ""
+
+# ─── Infrastructure: PostgreSQL ───────────────────────────────────────────────
+postgres:
+  # Set enabled: false and fill externalDatabase.* to use RDS / Azure DB / CloudSQL
+  enabled: true
+  image: postgres:16-alpine
+  storage: 10Gi
+  storageClass: ""        # "" = cluster default StorageClass
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+# Used when postgres.enabled = false
+externalDatabase:
+  host: ""
+  port: 5432
+  name: credebl
+  user: credebl
+  existingSecret: ""      # K8s Secret name; must contain key "POSTGRES_PASSWORD"
+
+# ─── Infrastructure: Redis ────────────────────────────────────────────────────
+redis:
+  enabled: true
+  image: redis:7.4-alpine
+  storage: 2Gi
+  storageClass: ""
+  resources:
+    limits:
+      memory: 256Mi
+      cpu: 250m
+
+externalRedis:
+  host: ""
+  port: 6379
+
+# ─── Infrastructure: NATS ─────────────────────────────────────────────────────
+nats:
+  enabled: true
+  image: nats:2.10-alpine
+  storage: 2Gi
+  storageClass: ""
+  resources:
+    limits:
+      memory: 256Mi
+      cpu: 250m
+
+# ─── Infrastructure: Keycloak (OIDC provider) ─────────────────────────────────
+keycloak:
+  # Set enabled: false and fill oidc.* to swap in the country's real OIDC on Day 5
+  enabled: true
+  image: quay.io/keycloak/keycloak:25.0.6
+  adminUser: admin
+  # Public URL for Keycloak — must be accessible from the browser AND from within
+  # the cluster. Defaults to https://auth.{global.domain}
+  publicUrl: ""
+  resources:
+    limits:
+      memory: 768Mi
+      cpu: 1000m
+
+# Country's real OIDC — only used when keycloak.enabled = false (Day 5 swap)
+oidc:
+  issuerUrl: ""           # e.g. https://accounts.gov.co/realms/ciudadanos
+  clientId: ""
+  managementClientId: ""
+  existingSecret: ""      # must contain keys: clientSecret, managementClientSecret
+
+# ─── Infrastructure: MinIO (S3-compatible object storage) ────────────────────
+minio:
+  # Set enabled: false and fill externalS3.* to use AWS S3 / Azure Blob / GCS
+  enabled: true
+  image: minio/minio:latest
+  storage: 20Gi
+  storageClass: ""
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+externalS3:
+  endpoint: ""            # Leave empty for AWS S3 default; set for other providers
+  region: us-east-1
+  bucket: credebl-bucket
+  existingSecret: ""      # must contain keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+
+# ─── Infrastructure: Mailpit (SMTP mock) ──────────────────────────────────────
+mailpit:
+  # Set enabled: false and fill smtp.* to use SendGrid / SES / real SMTP
+  enabled: true
+  image: axllent/mailpit:latest
+  resources:
+    limits:
+      memory: 128Mi
+      cpu: 100m
+
+smtp:
+  host: ""
+  port: 587
+  secure: true
+  from: "noreply@example.com"
+  existingSecret: ""      # must contain key: SENDGRID_API_KEY
+
+# ─── CREDEBL Platform credentials ────────────────────────────────────────────
+# All secrets below should be moved to existingSecret in production.
+credebl:
+  # AES encryption key — must match across ALL services. Change before deploy.
+  cryptoPrivateKey: "change-me-32-char-crypto-key-xxxx"
+
+  jwtSecret: "change-me-jwt-secret-hex-64-chars-xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  jwtTokenSecret: "change-me-base64-jwt-token-secret=="
+  nextauthSecret: "change-me-nextauth-secret-32chars"
+  nextauthCookieDomain: ""
+
+  # Platform admin credentials (created on first seed)
+  platformAdminEmail: "admin@example.com"
+  platformAdminInitialPassword: "change-me-admin-password"
+  platformSeed: ""        # 32-char hex; leave empty to auto-generate
+
+  # Agent
+  agentApiKey: "change-me-agent-api-key"
+
+  # Public URLs — MUST match what browsers and wallets will call
+  # Defaults to https://api.{global.domain} and https://studio.{global.domain}
+  apiEndpoint: ""         # e.g. api.credebl.example.com  (no protocol prefix)
+  studioUrl: ""           # e.g. https://studio.credebl.example.com
+  appProtocol: "https"    # http for PoC, https for production
+
+  # Ledger (BCovrin testnet for PoC — change to production ledger post-mission)
+  ledgerUrl: "http://test.bcovrin.vonx.io"
+  genesisUrl: "http://test.bcovrin.vonx.io/genesis"
+  tailsFileServer: "https://tails.vonx.io"
+
+  # Mobile wallet branding shown in issuance emails
+  mobileAppName: "Inji Wallet"
+  mobileAppDownloadUrl: "https://inji.mosip.io"
+  playStoreDownloadLink: "https://play.google.com/store/apps/details?id=io.mosip.residentapp"
+
+  # Keycloak OAuth (auto-configured from keycloak.* when keycloak.enabled=true)
+  keycloakRealm: credebl-realm
+  keycloakClientId: credebl-client
+  keycloakManagementClientId: adminClient
+
+  # Studio build — Studio bakes NEXT_PUBLIC_* at image build time.
+  # Provide a pre-built image here. If empty, the chart expects
+  # studio image to be built separately and pushed to a registry.
+  # Build args are documented in credebl/docker-compose.yml.
+  studioImage: ""         # e.g. registry.example.com/credebl-studio:v1.0.0
+
+  # existingSecret: set to a K8s Secret name to pull ALL credebl.* values
+  # from there instead of from this values file. Secret must contain all keys
+  # listed under credebl.* (e.g. CRYPTO_PRIVATE_KEY, JWT_SECRET, etc.)
+  existingSecret: ""
+
+# ─── Per-service resource configuration ──────────────────────────────────────
+services:
+  apiGateway:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 512Mi
+        cpu: 500m
+
+  studio:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 768Mi
+        cpu: 500m
+
+  user:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  utility:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  connection:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  issuance:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 384Mi
+        cpu: 500m
+
+  ledger:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  organization:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 384Mi
+        cpu: 500m
+
+  verification:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 384Mi
+        cpu: 500m
+
+  cloudWallet:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  ecosystem:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  schemaFileServer:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 256Mi
+        cpu: 250m
+
+  agentProvisioning:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 512Mi
+        cpu: 500m
+    # agent-provisioning spawns Credo controller containers at runtime via the
+    # Docker daemon. In K8s this requires access to the host Docker socket.
+    # For production, consider replacing with a K8s-native operator.
+    dockerSocket:
+      hostPath: /var/run/docker.sock
+    # Agent port range (must be exposed on the node as NodePorts or via LB)
+    agentPortStart: 8000
+    agentPortEnd: 8099
+    inboundPortStart: 9100
+
+  agentService:
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 512Mi
+        cpu: 500m
+    platformWalletName: platformadminwallet
+    platformWalletPassword: platformadminwallet123
+    dockerSocket:
+      hostPath: /var/run/docker.sock
+
+# ─── Ingress ──────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  tls: true
+  # Override individual hostnames (default: {subdomain}.{global.domain})
+  apiHost: ""        # → api.{global.domain}
+  studioHost: ""     # → studio.{global.domain}
+  authHost: ""       # → auth.{global.domain}  (Keycloak)
+  schemasHost: ""    # → schemas.{global.domain}
+
+# ─── Horizontal Pod Autoscaling ───────────────────────────────────────────────
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80

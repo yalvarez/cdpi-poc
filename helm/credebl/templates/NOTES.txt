@@ -1,0 +1,52 @@
+CREDEBL has been deployed successfully!
+
+┌─────────────────────────────────────────────────────────────────────┐
+│  Endpoints                                                          │
+├─────────────────────────────────────────────────────────────────────┤
+│  Studio (web UI):  {{ include "credebl.studioUrl" . }}
+│  API Gateway:      {{ .Values.credebl.appProtocol }}://{{ include "credebl.apiEndpoint" . }}
+{{- if .Values.keycloak.enabled }}
+│  Keycloak:         {{ include "credebl.keycloakPublicUrl" . }}
+{{- end }}
+{{- if .Values.minio.enabled }}
+│  MinIO console:    http://<node-ip>:9001
+{{- end }}
+{{- if .Values.mailpit.enabled }}
+│  Mailpit (email):  http://<node-ip>:8025
+{{- end }}
+└─────────────────────────────────────────────────────────────────────┘
+
+FIRST-TIME SETUP
+━━━━━━━━━━━━━━━
+1. Wait for all Jobs to complete (seed + bootstrap):
+   kubectl get jobs -n {{ .Release.Namespace }} -w
+
+2. Wait for all Deployments to be ready:
+   kubectl rollout status deployment/api-gateway -n {{ .Release.Namespace }}
+
+3. Platform admin credentials:
+   Email:    {{ .Values.credebl.platformAdminEmail }}
+   Password: (set in credebl-secrets → PLATFORM_ADMIN_INITIAL_PASSWORD)
+
+4. Create platform admin shared wallet + DID via Studio or API
+   (or re-run the bootstrap job if it failed).
+
+OIDC SWAP (Day 5 procedure)
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+To replace Keycloak with the country's real OIDC:
+  helm upgrade credebl ./credebl \
+    --set keycloak.enabled=false \
+    --set oidc.issuerUrl=https://accounts.gov.co/realms/ciudadanos \
+    --set oidc.clientId=credebl-client \
+    --set oidc.existingSecret=credebl-oidc-secret
+
+DOCKER SOCKET WARNING
+━━━━━━━━━━━━━━━━━━━━
+agent-provisioning and agent-service mount the host Docker socket to spawn
+Credo controller containers at runtime. This requires privileged pods.
+For hardened production deployments, consult the CREDEBL operator roadmap.
+
+HEALTH CHECK
+━━━━━━━━━━━━
+  kubectl get pods -n {{ .Release.Namespace }}
+  curl -s {{ .Values.credebl.appProtocol }}://{{ include "credebl.apiEndpoint" . }}/

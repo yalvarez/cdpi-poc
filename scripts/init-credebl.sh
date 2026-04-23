@@ -1536,6 +1536,24 @@ fi
 # rebuilding images, or running docker compose up. This replaces any need for a
 # separate apply-patches.sh script — everything runs from this single entry point.
 
+# Non-interactive fast-path: bash init-credebl.sh --repatch-issuance
+# Re-applies only the four issuance patches and restarts the issuance container.
+# Use this after any 'docker compose up -d issuance' that recreated the container.
+if [ "${1:-}" = "--repatch-issuance" ]; then
+  if [ ! -f "$ENV_FILE" ]; then echo "Error: no .env found at $ENV_FILE" >&2; exit 1; fi
+  _ev() { grep "^${1}=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
+  POSTGRES_PASSWORD="$(_ev POSTGRES_PASSWORD)"
+  cd "$CREDEBL_DIR"
+  echo "=== Re-patching issuance container ==="
+  echo -n "  Patch 4 (schema URL dedup): "; patch_issuance_schema_url
+  echo -n "  Patch 5 (@context triple-prefix): "; patch_issuance_context_urls
+  echo -n "  Patch 9B (OOB credential upsert): "; patch_issuance_oob_credential_save
+  echo -n "  Patch 10 (QR encoding): "; patch_issuance_qr_encoding
+  docker compose restart issuance >/dev/null
+  echo "  Done. Issuance container restarted."
+  exit 0
+fi
+
 if [ -f "$ENV_FILE" ]; then
   echo "  Existing deployment found."
   echo
@@ -1664,8 +1682,8 @@ case "$EMAIL_CHOICE" in
   3)
     EMAIL_PROVIDER_CHOICE="brevo"
     EMAIL_FROM_VAL="$(ask "From address (your Brevo account email or verified sender)" "noreply@cdpi-poc.local")"
-    SMTP_USER_VAL="$(ask "Brevo SMTP login (your Brevo account email)")"
-    SMTP_PASS_VAL="$(ask "Brevo SMTP master key" "" "true")"
+    SMTP_USER_VAL="$(ask "Brevo SMTP login (from Brevo SMTP Settings page, e.g. a8f946001@smtp-brevo.com)")"
+    SMTP_PASS_VAL="$(ask "Brevo SMTP master key (starts with xsmtpsib-...)" "" "true")"
     SMTP_HOST_VAL="smtp-relay.brevo.com"
     SMTP_PORT_VAL="587"
     SMTP_SECURE_VAL="false"

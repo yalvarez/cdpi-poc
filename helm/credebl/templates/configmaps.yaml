@@ -1,0 +1,40 @@
+---
+# postgres-init.sql — creates keycloak schema in shared DB
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-sql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+data:
+  init.sql: |
+    -- Create keycloak schema in the shared CREDEBL database
+    CREATE SCHEMA IF NOT EXISTS keycloak;
+    GRANT ALL PRIVILEGES ON SCHEMA keycloak TO credebl;
+---
+# credebl-master-table — seed data for ledger configs and org_agents_type
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: credebl-master-table
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+data:
+  credebl-master-table.json: |
+{{ .Files.Get "config/credebl-master-table.json" | indent 4 }}
+---
+{{- if .Values.keycloak.enabled }}
+# keycloak-realm — pre-configured realm with roles, clients, and users
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+data:
+  realm.json: |
+{{ .Files.Get "config/keycloak-realm.json" | indent 4 }}
+{{- end }}

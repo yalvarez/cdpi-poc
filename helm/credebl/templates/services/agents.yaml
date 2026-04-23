@@ -1,0 +1,278 @@
+{{/*
+Agent services — agent-provisioning and agent-service.
+
+These two services share two critical requirements:
+  1. Access to the host Docker daemon (/var/run/docker.sock) to spawn
+     Credo controller containers at runtime.
+  2. A shared volume (.agent-runtime/) holding agent configs, tokens,
+     and endpoint files written by agent-provisioning and read by agent-service.
+
+K8s implementation:
+  - Docker socket: hostPath volume (requires privileged pods).
+  - Shared runtime volume: a ReadWriteOnce PVC + podAffinity ensures both
+    pods land on the same node so they share the same hostPath.
+    For multi-node clusters, replace with an NFS/EFS/Azure Files PVC
+    using ReadWriteMany access mode.
+*/}}
+
+---
+# Shared PVC for agent runtime files
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agent-runtime
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.services.agentProvisioning.storageClass }}
+  storageClassName: {{ .Values.services.agentProvisioning.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-provisioning
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-provisioning
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-provisioning
+  template:
+    metadata:
+      labels:
+        app: agent-provisioning
+    spec:
+      {{- include "credebl.hostAliases" . | nindent 6 }}
+      # Pin to the same node as agent-service so the ReadWriteOnce PVC is shared
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: agent-service
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: wait-nats
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z nats 4222; do sleep 2; done']
+        - name: wait-api-gateway
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z api-gateway 5000; do sleep 3; done']
+        - name: prepare-agent-env
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /agent-runtime/agent-config \
+                       /agent-runtime/token \
+                       /agent-runtime/endpoints
+              # Write agent.env for the spawned Credo container
+              cat > /agent-runtime/agent.env <<EOF
+              WALLET_STORAGE_HOST=$(WALLET_STORAGE_HOST)
+              WALLET_STORAGE_PORT=5432
+              WALLET_STORAGE_USER=$(WALLET_STORAGE_USER)
+              WALLET_STORAGE_PASSWORD=$(WALLET_STORAGE_PASSWORD)
+              LEDGER_URL=$(LEDGER_URL)
+              GENESIS_URL=$(GENESIS_URL)
+              EOF
+          env:
+            - name: WALLET_STORAGE_HOST
+              value: {{ include "credebl.dbHost" . | quote }}
+            - name: WALLET_STORAGE_USER
+              value: "credebl"
+            - name: WALLET_STORAGE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credebl.existingSecret | default "credebl-secrets" }}
+                  key: POSTGRES_PASSWORD
+            - name: LEDGER_URL
+              value: {{ .Values.credebl.ledgerUrl | quote }}
+            - name: GENESIS_URL
+              value: {{ .Values.credebl.genesisUrl | quote }}
+          volumeMounts:
+            - name: agent-runtime
+              mountPath: /agent-runtime
+      containers:
+        - name: agent-provisioning
+          image: {{ .Values.global.imageRegistry }}/agent-provisioning:{{ .Values.global.imageTag }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            {{- include "credebl.commonEnv" . | nindent 12 }}
+            - name: ROOT_PATH
+              value: /app/agent-provisioning/AFJ/agent-config
+            - name: AGENT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credebl.existingSecret | default "credebl-secrets" }}
+                  key: AGENT_API_KEY
+            - name: INBOUND_PORT_START
+              value: {{ .Values.services.agentProvisioning.inboundPortStart | quote }}
+            - name: AFJ_VERSION
+              value: "ghcr.io/credebl/credo-controller:latest"
+            - name: AFJ_AGENT_SPIN_UP
+              value: "/agent-provisioning/AFJ/scripts/docker_start_agent.sh"
+            - name: AFJ_AGENT_ENDPOINT_PATH
+              value: "/agent-provisioning/AFJ/endpoints/"
+          readinessProbe:
+            exec:
+              command: ['sh', '-c', 'pgrep -f "node.*main" > /dev/null 2>&1']
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 15
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            - name: agent-runtime
+              mountPath: /app/agent-provisioning/AFJ/agent-config
+              subPath: agent-config
+            - name: agent-runtime
+              mountPath: /app/agent-provisioning/AFJ/token
+              subPath: token
+            - name: agent-runtime
+              mountPath: /app/agent-provisioning/AFJ/endpoints
+              subPath: endpoints
+            - name: agent-runtime
+              mountPath: /app/agent.env
+              subPath: agent.env
+              readOnly: true
+          resources:
+            {{- toYaml .Values.services.agentProvisioning.resources | nindent 12 }}
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: {{ .Values.services.agentProvisioning.dockerSocket.hostPath }}
+            type: Socket
+        - name: agent-runtime
+          persistentVolumeClaim:
+            claimName: agent-runtime
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-provisioning
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: agent-provisioning
+  ports:
+    - port: 3000
+      targetPort: 3000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-service
+  template:
+    metadata:
+      labels:
+        app: agent-service
+    spec:
+      {{- include "credebl.hostAliases" . | nindent 6 }}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: agent-provisioning
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: wait-agent-provisioning
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z agent-provisioning 3000; do sleep 3; done']
+      containers:
+        - name: agent-service
+          image: {{ .Values.global.imageRegistry }}/agent-service:{{ .Values.global.imageTag }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -ec
+            - 'sleep 30 && node dist/apps/agent-service/main.js'
+          env:
+            {{- include "credebl.commonEnv" . | nindent 12 }}
+            - name: PLATFORM_WALLET_NAME
+              value: {{ .Values.services.agentService.platformWalletName | quote }}
+            - name: PLATFORM_WALLET_PASSWORD
+              value: {{ .Values.services.agentService.platformWalletPassword | quote }}
+            - name: WALLET_STORAGE_HOST
+              value: {{ include "credebl.dbHost" . | quote }}
+            - name: WALLET_STORAGE_PORT
+              value: "5432"
+            - name: WALLET_STORAGE_USER
+              value: "credebl"
+            - name: WALLET_STORAGE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credebl.existingSecret | default "credebl-secrets" }}
+                  key: POSTGRES_PASSWORD
+            - name: AGENT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credebl.existingSecret | default "credebl-secrets" }}
+                  key: AGENT_API_KEY
+            - name: AFJ_VERSION
+              value: "ghcr.io/credebl/credo-controller:latest"
+            - name: SOCKET_HOST
+              value: "http://api-gateway:5000"
+            - name: AGENT_PORT_START
+              value: {{ .Values.services.agentProvisioning.agentPortStart | quote }}
+            - name: AGENT_PORT_END
+              value: {{ .Values.services.agentProvisioning.agentPortEnd | quote }}
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            - name: agent-runtime
+              mountPath: /app/agent-provisioning/AFJ/agent-config
+              subPath: agent-config
+            - name: agent-runtime
+              mountPath: /app/agent-provisioning/AFJ/token
+              subPath: token
+          resources:
+            {{- toYaml .Values.services.agentService.resources | nindent 12 }}
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: {{ .Values.services.agentService.dockerSocket.hostPath }}
+            type: Socket
+        - name: agent-runtime
+          persistentVolumeClaim:
+            claimName: agent-runtime
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: agent-service
+  ports:
+    - port: 3000
+      targetPort: 3000

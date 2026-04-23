@@ -1,0 +1,27 @@
+apiVersion: v2
+name: credebl
+description: >
+  CREDEBL — Verifiable Credentials platform Helm chart.
+  Packages all CREDEBL microservices with toggleable infrastructure
+  (Postgres, Redis, NATS, Keycloak, MinIO, Mailpit) that can be replaced
+  with managed cloud equivalents (RDS, ElastiCache, SES, S3, external OIDC).
+type: application
+version: 0.1.0
+appVersion: "2.1.3"
+
+keywords:
+  - verifiable-credentials
+  - oid4vci
+  - oid4vp
+  - ssi
+  - digital-public-infrastructure
+
+home: https://github.com/credebl/platform
+sources:
+  - https://github.com/credebl/platform
+  - https://github.com/credebl/studio
+
+maintainers:
+  - name: CDPI
+    email: tech@cdpi.dev
+    url: https://cdpi.dev

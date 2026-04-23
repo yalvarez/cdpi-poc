@@ -1,0 +1,56 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-file-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: schema-file-server
+spec:
+  replicas: {{ .Values.services.schemaFileServer.replicaCount }}
+  selector:
+    matchLabels:
+      app: schema-file-server
+  template:
+    metadata:
+      labels:
+        app: schema-file-server
+    spec:
+      securityContext:
+        runAsUser: 0
+      initContainers:
+        - name: wait-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z postgres 5432; do sleep 2; done']
+      containers:
+        - name: schema-file-server
+          image: {{ .Values.global.imageRegistry }}/schema-file-server:{{ .Values.global.imageTag }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: 4000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.credebl.existingSecret | default "credebl-secrets" }}
+                  key: DATABASE_URL
+            # schema-file-server expects CRYPTO_PRIVATE_KEY as base64-encoded bytes
+            - name: CRYPTO_PRIVATE_KEY
+              value: {{ .Values.credebl.cryptoPrivateKey | b64enc | quote }}
+          resources:
+            {{- toYaml .Values.services.schemaFileServer.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: schema-file-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: schema-file-server
+  ports:
+    - port: 4000
+      targetPort: 4000

@@ -1,0 +1,138 @@
+# =============================================================================
+# CREDEBL — Production overrides
+# =============================================================================
+# Apply on top of values.yaml:
+#   helm install credebl ./credebl \
+#     -f values-production.yaml \
+#     -n credebl --create-namespace
+#
+# This file disables all self-contained infra and wires in managed services.
+# Fill in every "" before deploying.
+# =============================================================================
+
+global:
+  domain: "credebl.gov.co"         # production domain
+  imageTag: "2.1.3"                # pin to a release, never use "latest"
+  ingressIP: ""                    # LoadBalancer / Ingress NGINX external IP
+
+# ─── Disable self-contained infrastructure ───────────────────────────────────
+postgres:
+  enabled: false
+
+externalDatabase:
+  host: "credebl.xxxxxx.rds.amazonaws.com"   # RDS / Azure DB / CloudSQL
+  port: 5432
+  name: credebl
+  user: credebl
+  existingSecret: "credebl-db-secret"        # kubectl create secret generic credebl-db-secret \
+                                              #   --from-literal=POSTGRES_PASSWORD=<pass>
+
+redis:
+  enabled: false
+
+externalRedis:
+  host: "clustercfg.credebl.xxxxxx.cache.amazonaws.com"   # ElastiCache / Azure Cache
+  port: 6379
+
+nats:
+  enabled: true      # keep self-hosted; no managed NATS equivalent in major clouds
+  storage: 10Gi
+  storageClass: "gp3"
+
+keycloak:
+  enabled: false     # swap to country OIDC on Day 5
+
+oidc:
+  issuerUrl: "https://accounts.gov.co/realms/ciudadanos"
+  clientId: "credebl-client"
+  managementClientId: "adminClient"
+  existingSecret: "credebl-oidc-secret"     # kubectl create secret generic credebl-oidc-secret \
+                                             #   --from-literal=clientSecret=<secret> \
+                                             #   --from-literal=managementClientSecret=<secret>
+
+minio:
+  enabled: false
+
+externalS3:
+  endpoint: ""                              # empty = AWS S3 default
+  region: us-east-1
+  bucket: credebl-bucket-prod
+  existingSecret: "credebl-s3-secret"       # kubectl create secret generic credebl-s3-secret \
+                                             #   --from-literal=AWS_ACCESS_KEY_ID=<key> \
+                                             #   --from-literal=AWS_SECRET_ACCESS_KEY=<secret>
+
+mailpit:
+  enabled: false
+
+smtp:
+  host: "smtp.sendgrid.net"
+  port: 587
+  secure: true
+  from: "noreply@gov.co"
+  existingSecret: "credebl-smtp-secret"     # kubectl create secret generic credebl-smtp-secret \
+                                             #   --from-literal=SENDGRID_API_KEY=SG.xxxxx
+
+# ─── CREDEBL platform — point to production secrets ──────────────────────────
+credebl:
+  existingSecret: "credebl-platform-secret" # kubectl create secret generic credebl-platform-secret \
+                                             #   --from-literal=CRYPTO_PRIVATE_KEY=<key> \
+                                             #   --from-literal=JWT_SECRET=<secret> \
+                                             #   --from-literal=JWT_TOKEN_SECRET=<secret> \
+                                             #   --from-literal=NEXTAUTH_SECRET=<secret> \
+                                             #   --from-literal=PLATFORM_ADMIN_EMAIL=<email> \
+                                             #   --from-literal=PLATFORM_ADMIN_INITIAL_PASSWORD=<pass> \
+                                             #   --from-literal=AGENT_API_KEY=<key>
+
+  apiEndpoint: "api.credebl.gov.co"
+  studioUrl: "https://studio.credebl.gov.co"
+  appProtocol: "https"
+
+  # Production ledger — replace BCovrin testnet with a production Indy network
+  # or use did:web / did:key only (no ledger dependency).
+  ledgerUrl: "http://test.bcovrin.vonx.io"  # TODO: replace with prod ledger
+  genesisUrl: "http://test.bcovrin.vonx.io/genesis"
+
+  studioImage: "registry.example.com/credebl-studio:2.1.3"  # pre-built image
+
+# ─── Scale up stateless services ─────────────────────────────────────────────
+services:
+  apiGateway:
+    replicaCount: 2
+    resources:
+      limits:
+        memory: 1Gi
+        cpu: 1000m
+
+  issuance:
+    replicaCount: 2
+    resources:
+      limits:
+        memory: 512Mi
+        cpu: 500m
+
+  verification:
+    replicaCount: 2
+    resources:
+      limits:
+        memory: 512Mi
+        cpu: 500m
+
+  organization:
+    replicaCount: 2
+
+# ─── Enable autoscaling ───────────────────────────────────────────────────────
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# ─── Ingress ──────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  tls: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"

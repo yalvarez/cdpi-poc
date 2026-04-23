@@ -1,0 +1,142 @@
+{{/*
+Standard CREDEBL microservices — all share the same env, networking,
+and dependency pattern. Each gets a Deployment + ClusterIP Service.
+
+Services in this file (in startup order):
+  user → utility → connection → issuance → ledger → organization
+  → verification → cloud-wallet → ecosystem
+*/}}
+
+{{- define "credebl.microservice" -}}
+{{- $name     := .name }}
+{{- $values   := .values }}
+{{- $svcCfg   := .svcCfg }}
+{{- $root     := .root }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  replicas: {{ $svcCfg.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+    spec:
+      {{- include "credebl.hostAliases" $root | nindent 6 }}
+      initContainers:
+        - name: wait-nats
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z nats 4222; do sleep 2; done']
+        - name: wait-api-gateway
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z api-gateway 5000; do sleep 3; done']
+      containers:
+        - name: {{ $name }}
+          image: {{ $root.Values.global.imageRegistry }}/{{ $name }}:{{ $root.Values.global.imageTag }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            {{- include "credebl.commonEnv" $root | nindent 12 }}
+            {{- if .extraEnv }}
+            {{- toYaml .extraEnv | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml $svcCfg.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "credebl.labels" $root | nindent 4 }}
+spec:
+  selector:
+    app: {{ $name }}
+  ports:
+    - port: 3000
+      targetPort: 3000
+{{- end }}
+
+{{/* ── user ──────────────────────────────────────────────────────────────── */}}
+{{- include "credebl.microservice" (dict
+  "name"   "user"
+  "root"   .
+  "svcCfg" .Values.services.user
+  "values" .Values
+) }}
+
+{{/* ── utility ───────────────────────────────────────────────────────────── */}}
+{{- include "credebl.microservice" (dict
+  "name"    "utility"
+  "root"    .
+  "svcCfg"  .Values.services.utility
+  "values"  .Values
+  "extraEnv" (list (dict "name" "AWS_SDK_LOAD_CONFIG" "value" "1"))
+) }}
+
+{{/* ── connection ───────────────────────────────────────────────────────── */}}
+{{- include "credebl.microservice" (dict
+  "name"   "connection"
+  "root"   .
+  "svcCfg" .Values.services.connection
+  "values" .Values
+) }}
+
+{{/* ── issuance ─────────────────────────────────────────────────────────── */}}
+{{- include "credebl.microservice" (dict
+  "name"    "issuance"
+  "root"    .
+  "svcCfg"  .Values.services.issuance
+  "values"  .Values
+  "extraEnv" (list (dict "name" "OOB_BATCH_SIZE" "value" "50"))
+) }}
+
+{{/* ── ledger ───────────────────────────────────────────────────────────── */}}
+{{- include "credebl.microservice" (dict
+  "name"   "ledger"
+  "root"   .
+  "svcCfg" .Values.services.ledger
+  "values" .Values
+) }}
+
+{{/* ── organization ─────────────────────────────────────────────────────── */}}
+{{- include "credebl.microservice" (dict
+  "name"   "organization"
+  "root"   .
+  "svcCfg" .Values.services.organization
+  "values" .Values
+) }}
+
+{{/* ── verification ─────────────────────────────────────────────────────── */}}
+{{- include "credebl.microservice" (dict
+  "name"    "verification"
+  "root"    .
+  "svcCfg"  .Values.services.verification
+  "values"  .Values
+  "extraEnv" (list (dict "name" "PROOF_REQ_CONN_LIMIT" "value" "50"))
+) }}
+
+{{/* ── cloud-wallet ─────────────────────────────────────────────────────── */}}
+{{- include "credebl.microservice" (dict
+  "name"   "cloud-wallet"
+  "root"   .
+  "svcCfg" .Values.services.cloudWallet
+  "values" .Values
+) }}
+
+{{/* ── ecosystem ────────────────────────────────────────────────────────── */}}
+{{- include "credebl.microservice" (dict
+  "name"   "ecosystem"
+  "root"   .
+  "svcCfg" .Values.services.ecosystem
+  "values" .Values
+) }}
