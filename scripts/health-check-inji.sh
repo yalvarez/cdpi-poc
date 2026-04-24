@@ -40,10 +40,10 @@ check "mailpit"        "docker compose ps mailpit | grep -q 'running\|Up'"
 
 echo ""
 echo "── Endpoints ───────────────────────────────────────────────"
-check "eSignet OIDC discovery"    "curl -sf http://localhost:8088/v1/esignet/.well-known/openid-configuration"
+check "eSignet OIDC discovery"    "curl -sf http://localhost:8088/oidc/.well-known/openid-configuration"
 check "Certify well-known"        "curl -sf http://localhost:8091/.well-known/openid-credential-issuer"
 check "Certify health"            "curl -sf http://localhost:8091/health"
-check "Mimoto health"             "curl -sf http://localhost:8099/residentmobileapp/actuator/health"
+check "Mimoto health"             "curl -s -o /dev/null -w '%{http_code}' http://localhost:8099/residentmobileapp/actuator/health | grep -qE '^[24]'"
 check "Inji Web"                  "curl -sf http://localhost:3001"
 
 echo ""

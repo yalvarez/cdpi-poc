@@ -1,9 +1,18 @@
 {
   "issuers": [
     {
-      "credential_issuer": "http://YOUR_VPS_IP:8091/v1/certify",
+      "issuer_id": "cdpi-poc-issuer",
+      "protocol": "OID4VCI",
+      "credential_issuer": "http://161.97.152.40:8091/v1/certify",
+      "credential_issuer_host": "http://161.97.152.40:8091",
+      "wellknown_endpoint": "http://certify-nginx:8091/.well-known/openid-credential-issuer",
       "client_id": "inji-certify-client",
-      "redirect_uri": "http://YOUR_VPS_IP:3001/home",
+      "client_alias": "inji-certify-client",
+      "redirect_uri": "http://161.97.152.40:3001/home",
+      "authorization_audience": "http://161.97.152.40:8091/v1/certify",
+      "token_endpoint": "http://161.97.152.40:8099/residentmobileapp/get-token/cdpi-poc-issuer",
+      "proxy_token_endpoint": "http://esignet:8088/v1/esignet/oauth/v2/token",
+      "enabled": "true",
       "additional_headers": {
         "Content-Type": "application/json"
       },
@@ -16,7 +25,8 @@
       "display": [
         {
           "name": "CDPI PoC Issuer",
-          "locale": "en",
+          "title": "CDPI PoC Credential Issuer",
+          "language": "en",
           "logo": {
             "url": "https://cdpi.dev/wp-content/uploads/2023/04/cdpi-logo.png",
             "alt_text": "CDPI Logo"
@@ -25,7 +35,8 @@
         },
         {
           "name": "Emisor CDPI PoC",
-          "locale": "es",
+          "title": "Emisor de Credenciales CDPI PoC",
+          "language": "es",
           "description": "Centro para Infraestructura Pública Digital — Emisor de Credenciales PoC"
         }
       ]

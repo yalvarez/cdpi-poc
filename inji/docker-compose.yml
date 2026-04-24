@@ -87,26 +87,66 @@ services:
         limits:
           memory: 128M
 
+  # ── Mock Identity System (required by esignet-mock-plugin for UIN/OTP auth) ─
+  mock-identity-system:
+    image: mosipid/mock-identity-system:0.10.1
+    container_name: inji-mock-identity-system
+    user: root
+    restart: unless-stopped
+    environment:
+      - active_profile_env=local
+      - SPRING_CONFIG_LOCATION=/config/mockid/
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-mosip_db}?currentSchema=mockidentitysystem
+      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER:-inji}
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
+      - db.dbuser.password=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-mosip_db}
+      - POSTGRES_USER=${POSTGRES_USER:-inji}
+      - CERTIFY_KEYSTORE_PASSWORD=${CERTIFY_KEYSTORE_PASSWORD}
+      - MOSIP_MOCK_IDA_KYC_TRANSACTION_TIMEOUT_SECS=900
+    volumes:
+      - ./config/mock-identity-system:/config/mockid:ro
+      - ./certs:/certs:ro
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8082/v1/mock-identity-system/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    networks:
+      - inji-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
   # ── eSignet (Authorization Server — OIDC) ──────────────────────────────────
   # eSignet is INJI's native OIDC provider. On Day 5, swap its issuer URL
   # for the country's real Authorization Server URL in .env.
   esignet:
-    image: mosipid/esignet:1.5.1
+    image: mosipid/esignet-with-plugins:1.5.1
     container_name: inji-esignet
+    user: root
     restart: unless-stopped
     environment:
-      - SPRING_PROFILES_ACTIVE=default
       - SPRING_CONFIG_LOCATION=/config/esignet/
-      - mosip.esignet.database.hostname=postgres
-      - mosip.esignet.database.port=5432
-      - mosip.esignet.database.name=${POSTGRES_DB:-mosip_db}
-      - db.dbuser.password=${POSTGRES_PASSWORD}
+      - active_profile_env=local
+      - plugin_name_env=esignet-mock-plugin.jar
       - mosipbox_public_url=${PUBLIC_URL:-http://localhost}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-mosip_db}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - CERTIFY_KEYSTORE_PASSWORD=${CERTIFY_KEYSTORE_PASSWORD}
     volumes:
       - ./config/esignet:/config/esignet:ro
+      - ./certs:/certs
     ports:
       - "8088:8088"
     depends_on:
@@ -114,8 +154,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mock-identity-system:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8088/v1/esignet/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8088/actuator/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -131,6 +173,7 @@ services:
   inji-certify:
     image: mosipid/inji-certify-with-plugins:0.13.1
     container_name: inji-certify
+    user: root
     restart: unless-stopped
     environment:
       - SPRING_PROFILES_ACTIVE=${CERTIFY_PROFILE:-default}
@@ -145,9 +188,11 @@ services:
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - active_profile_env=${CERTIFY_PROFILE:-default}
-      # SoftHSM (key management — containerized, no external HSM needed)
-      - mosip.kernel.keymanager.hsm.config-path=/config/certify/softhsm-application.conf
-      - mosip.kernel.keymanager.hsm.keystore-type=PKCS11
+      - POSTGRES_USER=${POSTGRES_USER:-inji}
+      - CERTIFY_KEYSTORE_PASSWORD=${CERTIFY_KEYSTORE_PASSWORD}
+      # PKCS12 keystore (same as eSignet — no SoftHSM in this image)
+      - mosip.kernel.keymanager.hsm.config-path=/certs/oidckeystore.p12
+      - mosip.kernel.keymanager.hsm.keystore-type=PKCS12
     volumes:
       - ./config/certify:/config/certify:ro
       - ./certs:/certs
@@ -162,7 +207,7 @@ services:
       esignet:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8090/v1/certify/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/actuator/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -192,10 +237,28 @@ services:
         limits:
           memory: 64M
 
+  # ── Mimoto Config Server (serves issuers/verifiers JSON via HTTP) ────────────
+  # Mimoto's IssuersServiceImpl fetches config files via RestTemplate (HTTP only).
+  # This nginx serves /config/mimoto/ so config.server.file.storage.uri can point
+  # to http://mimoto-config-server/ instead of a remote GitHub URL.
+  mimoto-config-server:
+    image: nginx:stable-alpine
+    container_name: inji-mimoto-config-server
+    restart: unless-stopped
+    volumes:
+      - ./config/mimoto:/usr/share/nginx/html:ro
+    networks:
+      - inji-net
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+
   # ── Mimoto (BFF for Inji Web Wallet) ────────────────────────────────────────
   mimoto:
     image: mosipid/mimoto:0.19.2
     container_name: inji-mimoto
+    user: root
     restart: unless-stopped
     environment:
       - SPRING_PROFILES_ACTIVE=default
@@ -205,22 +268,32 @@ services:
       - mosip.mimoto.database.name=${POSTGRES_DB:-mosip_db}
       - db.dbuser.password=${POSTGRES_PASSWORD}
       - mosipbox_public_url=${PUBLIC_URL:-http://localhost}
+      - POSTGRES_USER=${POSTGRES_USER:-inji}
+      - CERTIFY_KEYSTORE_PASSWORD=${CERTIFY_KEYSTORE_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     volumes:
       - ./config/mimoto:/config/mimoto:ro
       - ./certs:/certs:ro
+      - mimoto_keystore:/home/mosip/encryption
     ports:
       - "8099:8099"
     depends_on:
       inji-certify:
         condition: service_healthy
+      mimoto-config-server:
+        condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8099/residentmobileapp/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qSO /dev/null http://localhost:8099/residentmobileapp/actuator/health 2>&1 | grep -qE 'HTTP.*[24][0-9][0-9]'"]
       interval: 30s
       timeout: 10s
       retries: 10
-      start_period: 90s
+      start_period: 120s
     networks:
-      - inji-net
+      inji-net:
+        aliases:
+          - mimoto-service
     deploy:
       resources:
         limits:
@@ -236,12 +309,12 @@ services:
       - ESIGNET_HOST=http://esignet:8088
       - DEFAULT_LANG=eng
     ports:
-      - "3001:3001"
+      - "3001:3004"
     depends_on:
       mimoto:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3001 || exit 1"]
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1:3004 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -275,6 +348,8 @@ volumes:
   redis_data:
     driver: local
   certify_data:
+    driver: local
+  mimoto_keystore:
     driver: local
 
 # ── Networks ───────────────────────────────────────────────────────────────────
