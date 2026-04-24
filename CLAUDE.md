@@ -269,6 +269,37 @@ INJI:    3001 (Inji Web), 5433 (Postgres), 6380 (Redis), 8088 (eSignet),
          8090 (Certify internal), 8091 (Certify Nginx), 8099 (Mimoto), 1026/8026 (Mailpit)
 ```
 
+### INJI startup fixes (validated April 23, 2026 — all required for a working stack)
+
+These fixes were discovered during VPS validation and are all codified in the committed config files. They must be re-applied if postgres data is wiped and the stack is re-deployed from scratch.
+
+**Fix 1 — Mimoto keystore must be on a writable volume**
+`mosip.kernel.keymanager.hsm.config-path` in `application-default.properties` must point to a writable path, NOT to `/certs/oidckeystore.p12` (which is mounted `:ro`). The keymanager creates its own PKCS12 file on first start. Correct path: `/home/mosip/encryption/mimoto-keystore.p12` backed by Docker named volume `mimoto_keystore`.
+_Symptom if wrong_: `KeystoreProcessingException: /certs/oidckeystore.p12 (Read-only file system)` — mimoto crash-loops on startup.
+
+**Fix 2 — `key_alias.uni_ident` must be varchar(512) in all schemas**
+MOSIP's key manager stores a UUID-derived unique identifier in `key_alias.uni_ident`. Hibernate's entity maps it as 32 chars; the actual values can exceed 128. The column must be created with `varchar(512)` BEFORE the service starts, or Hibernate `ddl-auto=update` creates it at 32 and the first key alias insert fails. All three schemas (`mockidentitysystem`, `esignet`, `mimoto`) have DDL in `postgres-init.sql` with `varchar(512)`.
+_Symptom if wrong_: `DataIntegrityViolationException: value too long for type character varying(32)` — service crashes on first key generation.
+
+**Fix 3 — mimoto health check: use wget, accept 401**
+The mimoto container (Alpine) has no `curl`. Health check uses `wget -qSO /dev/null ... 2>&1 | grep -qE 'HTTP.*[24][0-9][0-9]'`. The actuator health endpoint returns 401 (Spring Security activates when `spring.security.oauth2.client.registration.*` properties are present) — 401 is normal and means the service is running.
+
+**Fix 4 — inji-web nginx upstream is hardcoded as `mimoto-service`**
+The inji-web Docker image's nginx config has `upstream mimoto-service {...}` hardcoded. Docker DNS won't resolve this to the `inji-mimoto` container unless a network alias is set. Fix: add `aliases: [mimoto-service]` under `networks: inji-net:` in the mimoto service definition.
+_Symptom if wrong_: `502 Bad Gateway` from inji-web; nginx log shows `upstream not found: mimoto-service`.
+
+**Fix 5 — inji-web port mapping is 3001:3004**
+The inji-web container's internal nginx listens on port 3004, not 3001. Port mapping must be `3001:3004`. Health check must use `127.0.0.1:3004` (Alpine `localhost` resolves to IPv6 `::1` which nginx doesn't listen on).
+
+**Fix 6 — eSignet OIDC discovery URL is `/oidc/.well-known/openid-configuration`**
+Despite `server.servlet.path=/v1/esignet`, eSignet's `DispatcherServlet` is mapped at `/`. The `OpenIdConnectController` uses `@RequestMapping("/oidc")`, so the full path is `http://esignet:8088/oidc/.well-known/openid-configuration` — NOT `/v1/esignet/oidc/.well-known/...`.
+
+**Fix 7 — Certify actuator is at root context, not under servlet path**
+Spring Boot actuator does not move with the servlet path. Certify's actuator is at `http://inji-certify:8090/actuator/health`, not at `http://inji-certify:8090/v1/certify/actuator/health`. The nginx `/health` location must proxy to the root context path.
+
+**Fix 8 — `key_policy_def` seed rows required in all three schemas**
+`mockidentitysystem`, `esignet`, and `mimoto` all call `KeyManagerConfig.run()` or `AppConfig.run()` on startup, which queries `key_policy_def` for `ROOT` and service-specific entries. If those rows don't exist, the service crashes. All seed `INSERT ... ON CONFLICT DO NOTHING` statements are in `postgres-init.sql`.
+
 ---
 
 ## OIDC swap — Day 5 critical notes
@@ -310,7 +341,7 @@ INJI:    3001 (Inji Web), 5433 (Postgres), 6380 (Redis), 8088 (eSignet),
 - [x] **Platform-admin tenant wallet setup automated**: April 19, 2026. `ensure_platform_admin_tenant()` added to `init-credebl.sh`. Creates a Credo multi-tenancy tenant for Platform-admin, stores the encrypted `RestTenantAgent` JWT in `org_agents.apiKey`, and sets `tenantId`. Fixes Studio "Create DID" → 500 "Unauthorized" on fresh deployments. See "Platform-admin tenant wallet and DID creation" in Infrastructure design decisions.
 - [x] **Studio OOB JSON-LD credential issuance validated**: April 19, 2026. Required six patches total: (1) utility S3→MinIO, (2) api-gateway TLD validator, (3) Credo CredentialEvents crash guard, (4) issuance schema URL dedup, (5) issuance @context triple-prefix normalization, (6) agent-service shared wallet create-tenant root JWT. All automated in `init-credebl.sh`. Full flow validated: new org → shared wallet → DID → schema → OOB email issuance.
 - [x] **OID4VP proof request validated**: April 21, 2026. Patch 7 (ProofEvents.js crash guard — tenant-prefix + try-catch) added to `init-credebl.sh`. `api-test-oid4vc.sh` passes 9/10 steps: org → wallet → did:key → no_ledger schema → OOB proof request (presentationExchange, 201). Step 7 (SD-JWT issuance via `credentialType=sdjwt`) is pending backend PR #1279 — issuance service only supports "indy" and "jsonld" in current build.
-- [ ] **Validate INJI stack on real VPS**: Startup order matters. eSignet must be fully healthy before Certify starts (90s wait). Test the mock OID4VCI flow end-to-end with UIN `5860356276` / OTP `111111`.
+- [x] **Validate INJI stack on real VPS**: April 23, 2026. All 13 health checks pass. See "INJI startup fixes" section in Infrastructure design decisions for full details. Mock OID4VCI flow available at port 3001 with UIN `5860356276` / OTP `111111`.
 - [ ] **Colombia use case**: Once confirmed, adapt the relevant schema template and update `certify-employment.properties` with the correct credential type and `vct` URL.
 - [ ] **INJI credential configs for education, professional-license, civil-identity**: `certify-employment.properties` exists but the other 3 schema configs for INJI are not yet created. Use `certify-employment.properties` as template.
 
