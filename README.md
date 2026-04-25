@@ -79,8 +79,9 @@ cdpi-poc/
 
 | | CREDEBL | INJI |
 |--|---------|------|
-| **Architecture** | ~13 microservices + infra | 5 services + infra |
+| **Architecture** | ~13 microservices + infra | 10 services (Spring Boot + Nginx + infra) |
 | **Auth** | Keycloak | eSignet (MOSIP's native OIDC) |
+| **Mock identity** | None (uses email OTP) | mock-identity-system (UIN + OTP) |
 | **Credential formats** | SD-JWT VC, AnonCreds | SD-JWT VC, W3C VCDM 1.1/2.0 |
 | **Holder wallet** | External wallet (OID4VCI-compatible) | Inji Web included + Inji Mobile |
 | **RAM usage** | ~4.5GB | ~3.5GB |
@@ -153,46 +154,56 @@ All 37 checks should pass. Access points are printed at the end.
 
 Same requirements as CREDEBL. INJI images are **AMD64 only** — no ARM64 support.
 
-### 2. Configure the environment
-
-```bash
-cd /home/apps/cdpi-poc
-cp inji/.env.example inji/.env
-nano inji/.env   # fill in PUBLIC_URL and passwords
-```
-
-Minimum values to fill in `inji/.env`:
-
-| Variable | Description |
-|----------|-------------|
-| `PUBLIC_URL` | VPS public IP or hostname (e.g. `http://1.2.3.4`) |
-| `POSTGRES_PASSWORD` | Any strong password |
-| `REDIS_PASSWORD` | Any strong password |
-| `CERTIFY_KEYSTORE_PASSWORD` | Any strong password — used for PKCS12 keystore |
-
-### 3. Deploy
+### 2. Deploy
 
 ```bash
 bash scripts/init-inji.sh
 ```
 
-The script checks prerequisites, generates the OIDC keystore automatically, pulls images, starts the stack in the correct order (postgres → redis → eSignet → Certify → Mimoto → Inji Web), waits for each service to be healthy, and runs the health check. Re-runs are safe and idempotent.
+The script asks **1 question** (VPS public IP or hostname) and handles everything else automatically:
 
-### 4. Verify the deployment
+| What it does | Detail |
+|---|---|
+| Detect VPS IP | Auto-detected, confirm or override |
+| Generate all secrets | POSTGRES_PASSWORD, REDIS_PASSWORD, CERTIFY_KEYSTORE_PASSWORD, DB schema user passwords |
+| Write `inji/.env` | All variables injected — nothing to edit manually |
+| Print credentials report | Saved to `inji/.credentials-report` — save it securely |
+| Generate OIDC keystore | `inji/certs/oidckeystore.p12` (PKCS12, auto-generated) |
+| Pull images | Optional (recommended on first deploy, ~10 min) |
+| Start all 10 services | In the correct dependency order |
+| Wait for healthy state | Each service confirmed before the next starts |
+| Run health check | All 15 checks automatically |
+| Set DB schema passwords | Replaces placeholder passwords in postgres-init.sql |
 
-```bash
-bash scripts/health-check-inji.sh
-```
+Total startup time: **~8 minutes** (first deploy with image pull).
 
-All 13 checks should pass.
+### 3. Access the stack
 
-### 5. Test with mock credentials
+After the script completes, the access report is printed. Typical endpoints:
+
+| Service | URL |
+|---------|-----|
+| Inji Web wallet | `http://VPS_IP:3001` |
+| Certify API | `http://VPS_IP:8091/v1/certify` |
+| eSignet OIDC | `http://VPS_IP:8088/v1/esignet` |
+| Mock Identity System | `http://VPS_IP:8082` |
+| Email capture | `http://VPS_IP:8026` |
+
+### 4. Test with mock credentials
 
 Open `http://<YOUR_IP>:3001` in a browser. Use any of these test UINs with OTP `111111`:
 
 ```
 5860356276 / 2154189532 / 1234567890 / 0987654321 / 1122334455
 ```
+
+### 5. Verify the deployment
+
+```bash
+bash scripts/health-check-inji.sh
+```
+
+All 15 checks should pass.
 
 ---
 
@@ -238,6 +249,7 @@ The Studio image (`credebl-studio`) is preserved across resets since `docker com
 | Inji Web wallet | `http://VPS_IP:3001` |
 | Certify API | `http://VPS_IP:8091/v1/certify` |
 | eSignet OIDC | `http://VPS_IP:8088/v1/esignet` |
+| Mock Identity System | `http://VPS_IP:8082` |
 | Email (Mailpit) | `http://VPS_IP:8026` |
 
 ---
@@ -262,8 +274,8 @@ The Studio image (`credebl-studio`) is preserved across resets since `docker com
 - [x] CREDEBL — Verification SDK (Node.js + Python)
 - [x] SD-JWT VC schema templates × 4
 - [x] INJI — Docker Compose, env template, Certify + eSignet + Mimoto + Nginx
-- [x] INJI — Single-path initializer (`init-inji.sh`) — fill .env + run one command
-- [x] INJI — Validated end-to-end on real VPS (April 2026) — all 13 health checks pass
+- [x] INJI — Single-path initializer (`init-inji.sh`) — 1 prompt, secrets auto-generated
+- [x] INJI — Validated end-to-end on real VPS (April 2026) — all 15 health checks pass
 - [x] INJI — OIDC swap procedure (Day 5)
 - [x] INJI — Deployment manual + test flows
 - [x] INJI — Verification SDK (Node.js + Python)

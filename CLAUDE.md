@@ -56,11 +56,12 @@ cdpi-poc/
 │   ├── init-credebl.sh            ← CREDEBL single entry point: fresh deploy, patch recovery,
 │   │                                 SendGrid/Mailpit choice, SSL/nginx/certbot/Keycloak-HTTPS
 │   │                                 (5 interactive questions, 6-7 if SSL enabled)
-│   ├── init-inji.sh               ← INJI single entry point: .env validation, keystore gen,
-│   │                                 image pull, ordered startup, health check
+│   ├── init-inji.sh               ← INJI single entry point: 1 interactive question,
+│   │                                 secrets auto-generated, keystore gen, ordered startup,
+│   │                                 DB schema user passwords, health check
 │   ├── reset-credebl-poc.sh       ← Full CREDEBL teardown (containers + volumes + Credo)
 │   ├── health-check.sh            ← CREDEBL stack verification (37 checks)
-│   ├── health-check-inji.sh       ← INJI stack verification (13 checks)
+│   ├── health-check-inji.sh       ← INJI stack verification (15 checks)
 │   ├── bootstrap-platform-admin.sh ← CREDEBL platform-admin sync (auto-run by init-credebl.sh)
 │   └── generate-inji-certs.sh     ← PKCS12 keystore for INJI (called by init-inji.sh)
 │
@@ -126,8 +127,8 @@ cdpi-poc/
 
 | | CREDEBL | INJI |
 |--|---------|------|
-| **Images** | `ghcr.io/credebl/*` | `mosipid/inji-certify-with-plugins`, `mosipid/esignet`, `mosipid/mimoto`, `mosipid/inji-web` |
-| **Architecture** | ~13 microservices + infra | 5 services + infra |
+| **Images** | `ghcr.io/credebl/*` | `mosipid/inji-certify-with-plugins`, `mosipid/esignet-with-plugins`, `mosipid/mock-identity-system`, `mosipid/mimoto`, `mosipid/inji-web` |
+| **Architecture** | ~13 microservices + infra | 10 services (Spring Boot + Nginx + infra) |
 | **Auth server** | Keycloak 25.0.6 | eSignet 1.5.1 (MOSIP) |
 | **Storage** | MinIO (replaces AWS S3) | Not needed |
 | **Email** | Mailpit (replaces SendGrid) | Mailpit |
@@ -276,6 +277,29 @@ INJI:    3001 (Inji Web), 5433 (Postgres), 6380 (Redis), 8088 (eSignet),
          8090 (Certify internal), 8091 (Certify Nginx), 8099 (Mimoto), 1026/8026 (Mailpit)
 ```
 
+### INJI services (10 total)
+
+| Service | Image | Port | Role |
+|---------|-------|------|------|
+| postgres | postgres:14-alpine | 5433 | Shared DB — 4 schemas (mockidentitysystem, esignet, certify, mimoto) |
+| redis | redis:7-alpine | 6380 | Cache for all Spring Boot services |
+| mock-identity-system | mosipid/mock-identity-system:0.10.1 | 8082 | UIN/OTP identity provider — required by esignet-mock-plugin |
+| esignet | mosipid/esignet-with-plugins:1.5.1 | 8088 | OIDC Authorization Server |
+| inji-certify | mosipid/inji-certify-with-plugins:0.13.1 | 8090 | Credential issuance (OID4VCI) |
+| certify-nginx | nginx:stable-alpine | 8091 | Reverse proxy — handles `.well-known` routing for OID4VCI |
+| mimoto-config-server | nginx:stable-alpine | — | Serves `mimoto-issuers-config.json` and `mimoto-trusted-verifiers.json` via HTTP |
+| mimoto | mosipid/mimoto:0.19.2 | 8099 | BFF for Inji Web — proxies to Certify |
+| inji-web | mosipid/inji-web:0.14.1 | 3001 | Web-based holder wallet |
+| mailpit | axllent/mailpit | 1026/8026 | SMTP capture (optional email flows) |
+
+Startup order: postgres+redis → mock-identity-system → esignet → inji-certify → certify-nginx+mimoto-config-server → mimoto → inji-web+mailpit
+
+**Why mock-identity-system is required**: eSignet uses the `esignet-mock-plugin.jar` for UIN/OTP authentication. The mock plugin calls mock-identity-system's API to validate UINs. Without it, eSignet startup fails.
+
+**Why mimoto-config-server exists**: Mimoto's `IssuersServiceImpl` fetches `mimoto-issuers-config.json` via RestTemplate (HTTP only, no classpath). This Nginx serves the config files from `inji/config/mimoto/` so the config URL can be a local `http://mimoto-config-server/` instead of a remote GitHub URL.
+
+**Why certify-nginx exists**: OID4VCI requires `.well-known/openid-credential-issuer` at the issuer's root URL. Certify's Spring Boot actuator is at `/actuator/health` (root context), but the app itself is at `/v1/certify`. The Nginx proxy handles this routing transparently.
+
 ### INJI startup fixes (validated April 23, 2026 — all required for a working stack)
 
 These fixes were discovered during VPS validation and are all codified in the committed config files. They must be re-applied if postgres data is wiped and the stack is re-deployed from scratch.
@@ -348,7 +372,7 @@ Spring Boot actuator does not move with the servlet path. Certify's actuator is 
 - [x] **Platform-admin tenant wallet setup automated**: April 19, 2026. `ensure_platform_admin_tenant()` added to `init-credebl.sh`. Creates a Credo multi-tenancy tenant for Platform-admin, stores the encrypted `RestTenantAgent` JWT in `org_agents.apiKey`, and sets `tenantId`. Fixes Studio "Create DID" → 500 "Unauthorized" on fresh deployments. See "Platform-admin tenant wallet and DID creation" in Infrastructure design decisions.
 - [x] **Studio OOB JSON-LD credential issuance validated**: April 19, 2026. Required six patches total: (1) utility S3→MinIO, (2) api-gateway TLD validator, (3) Credo CredentialEvents crash guard, (4) issuance schema URL dedup, (5) issuance @context triple-prefix normalization, (6) agent-service shared wallet create-tenant root JWT. All automated in `init-credebl.sh`. Full flow validated: new org → shared wallet → DID → schema → OOB email issuance.
 - [x] **OID4VP proof request validated**: April 21, 2026. Patch 7 (ProofEvents.js crash guard — tenant-prefix + try-catch) added to `init-credebl.sh`. `api-test-oid4vc.sh` passes 9/10 steps: org → wallet → did:key → no_ledger schema → OOB proof request (presentationExchange, 201). Step 7 (SD-JWT issuance via `credentialType=sdjwt`) is pending backend PR #1279 — issuance service only supports "indy" and "jsonld" in current build.
-- [x] **Validate INJI stack on real VPS**: April 23, 2026. All 13 health checks pass. See "INJI startup fixes" section in Infrastructure design decisions for full details. Mock OID4VCI flow available at port 3001 with UIN `5860356276` / OTP `111111`.
+- [x] **Validate INJI stack on real VPS**: April 23, 2026. All 15 health checks pass (10 services + 5 endpoints). See "INJI services" and "INJI startup fixes" sections for full details. Mock OID4VCI flow available at port 3001 with UIN `5860356276` / OTP `111111`.
 - [ ] **Colombia use case**: Once confirmed, adapt the relevant schema template and update `certify-employment.properties` with the correct credential type and `vct` URL.
 - [ ] **INJI credential configs for education, professional-license, civil-identity**: `certify-employment.properties` exists but the other 3 schema configs for INJI are not yet created. Use `certify-employment.properties` as template.
 
