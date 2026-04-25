@@ -496,6 +496,31 @@ JSEOF
   docker exec --user root credebl-issuance node /tmp/patch_issuance_qr.js
 }
 
+patch_verification_qr_encoding() {
+  # Patch 11 — Verification service QR code attachment is corrupted binary.
+  # Same root cause as Patch 10 (issuance): content is raw base64 text but
+  # nodemailer has no encoding hint, so it MIME-encodes the base64 literals
+  # as UTF-8 — recipients get a text file of base64 characters, not a PNG.
+  # Fix: add encoding:'base64' and use contentDisposition (nodemailer canonical).
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_verif_qr_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/verification/main.js';
+let content = fs.readFileSync(path, 'utf8');
+if (content.includes('PATCH11: qr encoding')) { process.stdout.write('already patched\n'); process.exit(0); }
+const old = "outOfBandVerificationQrCode.split(';base64,')[1],\n                contentType: 'image/png',\n                disposition: 'attachment'";
+const nw  = "outOfBandVerificationQrCode.split(';base64,')[1],\n                contentType: 'image/png',\n                encoding: 'base64', /*PATCH11: qr encoding*/\n                contentDisposition: 'attachment'";
+if (!content.includes(old)) { process.stderr.write('ERROR: attachment pattern not found in verification main.js\n'); process.exit(1); }
+content = content.replace(old, nw);
+fs.writeFileSync(path, content);
+process.stdout.write('patched\n');
+JSEOF
+  docker cp "$patch_script" credebl-verification:/tmp/patch_verif_qr.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-verification node /tmp/patch_verif_qr.js
+}
+
 patch_agent_service_create_tenant() {
   # agent-service._createTenantWallet sends the Platform-admin's tenant JWT
   # (RestTenantAgent) as the Authorization header when calling Credo's
@@ -647,6 +672,10 @@ apply_container_patches() {
   echo -n "  Issuance service QR code attachment encoding: "
   patch_issuance_qr_encoding
   docker compose restart issuance >/dev/null
+
+  echo -n "  Verification service QR code attachment encoding: "
+  patch_verification_qr_encoding
+  docker compose restart verification >/dev/null
 
   echo -n "  Agent-service shared wallet create-tenant (root JWT): "
   patch_agent_service_create_tenant
@@ -1165,6 +1194,11 @@ ssl_update_env() {
     set_env_var "$ENV_FILE" "FRONT_END_URL"         "https://${vps_domain}"
     set_env_var "$ENV_FILE" "SOCKET_HOST"           "https://${vps_domain}"
     set_env_var "$ENV_FILE" "ENABLE_CORS_IP_LIST"   "https://${vps_domain},http://localhost:3000,http://127.0.0.1:3000"
+    # Schema file server: use public hostname so @context URLs in issued credentials
+    # are resolvable by wallets. Port 4000 is published directly (no HTTPS needed
+    # for VC context resolution). Internal services can reach the public hostname.
+    set_env_var "$ENV_FILE" "SCHEMA_FILE_SERVER_URL"             "http://${vps_domain}:4000/schemas/"
+    set_env_var "$ENV_FILE" "NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL" "http://${vps_domain}:4000/schemas/"
   fi
 }
 
