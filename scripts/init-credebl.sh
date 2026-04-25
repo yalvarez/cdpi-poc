@@ -263,6 +263,8 @@ const fs = require('fs');
 const path = '/app/build/events/CredentialEvents.js';
 let content = fs.readFileSync(path, 'utf8');
 if (content.includes('getFormatData unavailable')) { process.stdout.write('already patched\n'); process.exit(0); }
+// New Credo API (>= credo-ts 0.5+) already uses withTenantAgent — old vulnerable path no longer exists
+if (content.includes('withTenantAgent')) { process.stdout.write('new API (no patch needed)\n'); process.exit(0); }
 const pattern = /^(\s+)const data = await agent\.modules\.credentials\.getFormatData\(record\.id\);\n\s+body\.credentialData = data;/m;
 const m = content.match(pattern);
 if (!m) { process.stderr.write('ERROR: patch target not found in CredentialEvents.js\n'); process.exit(1); }
@@ -318,6 +320,8 @@ const fs = require('fs');
 const path = '/app/build/events/ProofEvents.js';
 let c = fs.readFileSync(path, 'utf8');
 if (c.includes('proofData try-catch guard')) { process.stdout.write('already patched\n'); process.exit(0); }
+// New Credo API already strips tenant- prefix via split('tenant-') — no patch needed
+if (c.includes(".split('tenant-')")) { process.stdout.write('new API (no patch needed)\n'); process.exit(0); }
 // Fix A: strip "tenant-" prefix from contextCorrelationId before getTenantAgent
 const tenantIdTarget = 'tenantId: event.metadata.contextCorrelationId,';
 if (c.indexOf(tenantIdTarget) >= 0) {
@@ -836,7 +840,7 @@ ensure_keycloak_openid_scope() {
   token=$(curl -sf --max-time 15 -X POST \
     "http://localhost:8080/realms/master/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "client_id=admin-cli&username=${KEYCLOAK_ADMIN_USER}&password=${KEYCLOAK_ADMIN_PASSWORD}&grant_type=password" \
+    -d "client_id=admin-cli&username=${KEYCLOAK_ADMIN_USER:-admin}&password=${KEYCLOAK_ADMIN_PASSWORD}&grant_type=password" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2>/dev/null) || true
   if [ -z "$token" ]; then
     echo "  Warning: could not get Keycloak admin token — skipping openid scope check." >&2
