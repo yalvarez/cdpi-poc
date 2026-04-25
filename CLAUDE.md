@@ -56,10 +56,13 @@ cdpi-poc/
 │   ├── init-credebl.sh            ← CREDEBL single entry point: fresh deploy, patch recovery,
 │   │                                 SendGrid/Mailpit choice, SSL/nginx/certbot/Keycloak-HTTPS
 │   │                                 (5 interactive questions, 6-7 if SSL enabled)
-│   ├── health-check.sh            ← CREDEBL stack verification
-│   ├── health-check-inji.sh       ← INJI stack verification
-│   └── generate-inji-certs.sh     ← PKCS12 keystore for INJI (run once)
-├── api-test.sh                    ← Full E2E CREDEBL test (8 steps: signin → issuance → list)
+│   ├── init-inji.sh               ← INJI single entry point: .env validation, keystore gen,
+│   │                                 image pull, ordered startup, health check
+│   ├── reset-credebl-poc.sh       ← Full CREDEBL teardown (containers + volumes + Credo)
+│   ├── health-check.sh            ← CREDEBL stack verification (37 checks)
+│   ├── health-check-inji.sh       ← INJI stack verification (13 checks)
+│   ├── bootstrap-platform-admin.sh ← CREDEBL platform-admin sync (auto-run by init-credebl.sh)
+│   └── generate-inji-certs.sh     ← PKCS12 keystore for INJI (called by init-inji.sh)
 │
 ├── credebl/                       ← DPG Option A
 │   ├── docker-compose.yml         ← 13 CREDEBL services + MinIO + Mailpit + Keycloak
@@ -81,7 +84,11 @@ cdpi-poc/
 │   └── docs/
 │       ├── deployment-manual.md
 │       ├── oidc-swap-procedure.md ← Day 5: swap Keycloak for country OIDC
-│       └── test-flows.md          ← Complete curl sequences for all flows
+│       ├── test-flows.md          ← Complete curl sequences for all flows
+│       ├── api-test.sh            ← Full E2E CREDEBL test (8 steps: signin → issuance → list)
+│       ├── api-test-oid4vc.sh     ← OID4VCI + OID4VP end-to-end test (9 steps)
+│       ├── api-e2e-requests.md    ← Annotated curl reference for all API endpoints
+│       └── postman/               ← Postman collection + environment for CREDEBL API
 │
 └── inji/                          ← DPG Option B
     ├── docker-compose.yml         ← Certify + eSignet + Mimoto + Inji Web + Nginx

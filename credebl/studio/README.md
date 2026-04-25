@@ -37,7 +37,7 @@ pnpm run build
 
 ## Platform deployment
 
-For full platform setup, see the root `README.md` and use the automated scripts (`scripts/init-credebl-config.sh`, `scripts/setup-vps.sh`).
+For full platform setup, see the root `README.md` and use the automated scripts (`scripts/init-credebl.sh`, `scripts/setup-vps.sh`).
 
 ---
 

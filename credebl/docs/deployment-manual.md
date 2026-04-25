@@ -39,7 +39,7 @@ git clone <CDPI_REPO_URL> .
 bash scripts/init-credebl.sh
 ```
 
-Asks 4 questions (VPS host, Keycloak host, admin email, and whether to enable HTTPS). Generates all secrets automatically, writes `credebl/.env`, updates the seed host config, and runs the full Docker deployment sequence.
+Asks 5 questions (VPS host, Keycloak host, admin email, whether to enable HTTPS, and email provider). Generates all secrets automatically, writes `credebl/.env`, updates the seed host config, and runs the full Docker deployment sequence.
 
 The CREDEBL Docker commands must be run from the `credebl/` directory. This PoC uses `${PWD}/.agent-runtime/...` bind mounts so the spawned Credo child agents see the same host-side `agent-config` files as `agent-provisioning`.
 

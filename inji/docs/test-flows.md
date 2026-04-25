@@ -101,7 +101,7 @@ ACCESS_TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.access_token')
 echo "Access token: ${ACCESS_TOKEN:0:50}..."
 ```
 
-> **Note**: The pre-authorized code flow requires eSignet to be configured with the mock authenticator. For a full automated test, use the Postman collection at `docs/postman/`.
+> **Note**: The pre-authorized code flow requires eSignet to be configured with the mock authenticator. For the UI-based demo flow, use Flow 2 (Inji Web) instead.
 
 ---
 
