@@ -1348,6 +1348,25 @@ issue_cert() {
 issue_cert "$domain" "$email"
 [ -n "$vps_domain" ] && [ "$vps_domain" != "$domain" ] && issue_cert "$vps_domain" "$email"
 
+# ── Ensure certbot SSL support files exist ───────────────────────────────
+# certbot certonly --webroot does not create these; certbot --nginx does.
+# Create them here so the nginx include directives resolve correctly.
+mkdir -p /etc/letsencrypt
+if [ ! -f /etc/letsencrypt/options-ssl-nginx.conf ]; then
+  cat > /etc/letsencrypt/options-ssl-nginx.conf << 'SSLCONF'
+ssl_session_cache shared:le_nginx_SSL:10m;
+ssl_session_timeout 1440m;
+ssl_session_tickets off;
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
+SSLCONF
+fi
+if [ ! -f /etc/letsencrypt/ssl-dhparams.pem ]; then
+  log "Generating 2048-bit DH parameters (takes ~5–15s)..."
+  openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048 2>/dev/null
+fi
+
 # ── Upgrade Keycloak proxy to HTTPS ─────────────────────────────────────
 if [ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]; then
   log "Upgrading Keycloak proxy to HTTPS..."
