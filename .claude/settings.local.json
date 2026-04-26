@@ -35,7 +35,13 @@
       "Bash(ssh -o ConnectTimeout=10 root@cdpi-vps ' *)",
       "Bash(mkdir -p \"c:/Users/yalva/source/repos/cdpi-poc/helm/credebl/templates/infra\")",
       "Bash(mkdir -p \"c:/Users/yalva/source/repos/cdpi-poc/helm/credebl/templates/jobs\")",
-      "Bash(mkdir -p \"c:/Users/yalva/source/repos/cdpi-poc/helm/credebl/templates/services\")"
+      "Bash(mkdir -p \"c:/Users/yalva/source/repos/cdpi-poc/helm/credebl/templates/services\")",
+      "WebFetch(domain:docs.truvera.io)",
+      "WebFetch(domain:docs.credebl.id)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\yalva\\source\\repos\\cdpi-poc\\inji\\config"
     ]
   }
 }
