@@ -1916,6 +1916,7 @@ replacements = {
     "CRYPTO_PRIVATE_KEY":               e("CRYPTO_PRIVATE_KEY"),
     "ADMIN_KEYCLOAK_ID":                e("ADMIN_KEYCLOAK_ID"),
     "ADMIN_KEYCLOAK_SECRET":            e("ADMIN_KEYCLOAK_SECRET"),
+    "SUPPORTED_SSO_CLIENTS":           "CREDEBL",
     "NEXTAUTH_COOKIE_DOMAIN":           "",
     "PLATFORM_ADMIN_EMAIL":             e("PLATFORM_ADMIN_EMAIL"),
     "API_ENDPOINT":                     e("API_ENDPOINT"),
@@ -2137,6 +2138,19 @@ WHERE u.email = '${PLATFORM_ADMIN_EMAIL}'
   );
 " >/dev/null
 echo "  Platform admin owner role ensured."
+
+# Seed client_aliases so Studio's /auth/verification-mail?clientAlias=CREDEBL works.
+# CREDEBL sends clientAlias=CREDEBL on every user registration email. Without a matching
+# row the API returns 400 "Invalid clientAlias. Allowed values are: ".
+echo
+echo "Seeding client_aliases..."
+docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+  psql -U credebl -d credebl -v ON_ERROR_STOP=1 -c "
+INSERT INTO client_aliases (id, \"clientAlias\", \"clientUrl\")
+SELECT gen_random_uuid(), 'CREDEBL', '${STUDIO_URL}'
+WHERE NOT EXISTS (SELECT 1 FROM client_aliases WHERE \"clientAlias\" = 'CREDEBL');
+" >/dev/null
+echo "  client_aliases seeded (CREDEBL -> ${STUDIO_URL})."
 
 [ "$ENABLE_SSL" = "true" ] && run_ssl_setup
 
