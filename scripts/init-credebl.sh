@@ -928,6 +928,50 @@ ensure_keycloak_openid_scope() {
   done
 }
 
+ensure_keycloak_admin_client_redirect_uri() {
+  echo
+  echo "Ensuring adminClient has Studio redirect URI (required for verification email)..."
+
+  local token client_id current_uris
+
+  token=$(curl -sf --max-time 15 -X POST \
+    "http://localhost:8080/realms/master/protocol/openid-connect/token" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "client_id=admin-cli&username=${KEYCLOAK_ADMIN_USER:-admin}&password=${KEYCLOAK_ADMIN_PASSWORD}&grant_type=password" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2>/dev/null) || true
+  if [ -z "$token" ]; then
+    echo "  Warning: could not get Keycloak admin token — skipping redirect URI setup." >&2
+    return 0
+  fi
+
+  client_id=$(curl -sf --max-time 10 \
+    "http://localhost:8080/admin/realms/credebl-realm/clients?clientId=adminClient" \
+    -H "Authorization: Bearer ${token}" \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["id"] if d else "")' 2>/dev/null) || true
+  if [ -z "$client_id" ]; then
+    echo "  Warning: adminClient not found in Keycloak — skipping." >&2
+    return 0
+  fi
+
+  # Check if redirect URI already set
+  current_uris=$(curl -sf --max-time 10 \
+    "http://localhost:8080/admin/realms/credebl-realm/clients/${client_id}" \
+    -H "Authorization: Bearer ${token}" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("redirectUris","[]"))' 2>/dev/null) || true
+
+  if echo "$current_uris" | grep -qF "${STUDIO_URL}"; then
+    echo "  adminClient redirect URI already set."
+    return 0
+  fi
+
+  curl -sf --max-time 15 -X PUT \
+    "http://localhost:8080/admin/realms/credebl-realm/clients/${client_id}" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Content-Type: application/json" \
+    -d "{\"redirectUris\": [\"${STUDIO_URL}/*\"]}" >/dev/null
+  echo "  adminClient redirect URI set to ${STUDIO_URL}/*"
+}
+
 ensure_platform_admin_shared_agent() {
   echo
   echo "Ensuring platform-admin shared agent is initialized..."
@@ -2098,6 +2142,8 @@ ensure_brand_logo
 apply_container_patches
 
 ensure_keycloak_openid_scope
+
+ensure_keycloak_admin_client_redirect_uri
 
 ensure_platform_admin_shared_agent
 
