@@ -971,9 +971,13 @@ ensure_keycloak_admin_client_redirect_uri() {
     -d "{\"redirectUris\": [\"${STUDIO_URL}/*\"]}" >/dev/null
   echo "  adminClient redirect URI set to ${STUDIO_URL}/*"
 
-  # Grant view-clients role to adminClient service account so it can query
-  # GET /admin/realms/credebl-realm/clients when building the verification email link.
-  local sa_user_id rm_client_id view_clients_role_id
+  # Grant realm-management roles to adminClient service account.
+  # The user service uses adminClient credentials to call the Keycloak Admin API for:
+  #   - GET  /clients              (view-clients)
+  #   - POST /users                (manage-users)
+  #   - GET  /users, PUT /users/*  (view-users, manage-users)
+  #   - query-users, query-clients — needed for search endpoints
+  local sa_user_id rm_client_id role_json role_id role_name
   sa_user_id=$(curl -sf --max-time 10 \
     "http://localhost:8080/admin/realms/credebl-realm/clients/${client_id}/service-account-user" \
     -H "Authorization: Bearer ${token}" \
@@ -984,20 +988,24 @@ ensure_keycloak_admin_client_redirect_uri() {
     -H "Authorization: Bearer ${token}" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])' 2>/dev/null) || true
 
-  view_clients_role_id=$(curl -sf --max-time 10 \
-    "http://localhost:8080/admin/realms/credebl-realm/clients/${rm_client_id}/roles/view-clients" \
-    -H "Authorization: Bearer ${token}" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null) || true
-
-  if [ -n "$sa_user_id" ] && [ -n "$rm_client_id" ] && [ -n "$view_clients_role_id" ]; then
+  if [ -z "$sa_user_id" ] || [ -z "$rm_client_id" ]; then
+    echo "  Warning: could not resolve service account or realm-management client — skipping role grant." >&2
+  else
+    role_json="["
+    for role_name in manage-users view-users query-users manage-clients view-clients query-clients manage-realm view-realm; do
+      role_id=$(curl -sf --max-time 10 \
+        "http://localhost:8080/admin/realms/credebl-realm/clients/${rm_client_id}/roles/${role_name}" \
+        -H "Authorization: Bearer ${token}" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null) || true
+      [ -n "$role_id" ] && role_json="${role_json}{\"id\":\"${role_id}\",\"name\":\"${role_name}\"},"
+    done
+    role_json="${role_json%,}]"
     curl -sf --max-time 10 -X POST \
       "http://localhost:8080/admin/realms/credebl-realm/users/${sa_user_id}/role-mappings/clients/${rm_client_id}" \
       -H "Authorization: Bearer ${token}" \
       -H "Content-Type: application/json" \
-      -d "[{\"id\":\"${view_clients_role_id}\",\"name\":\"view-clients\"}]" >/dev/null || true
-    echo "  adminClient service account granted view-clients role."
-  else
-    echo "  Warning: could not grant view-clients role — service account or role not found." >&2
+      -d "${role_json}" >/dev/null || true
+    echo "  adminClient service account granted realm-management roles."
   fi
 }
 
