@@ -725,6 +725,52 @@ services:
         limits:
           memory: 256M
 
+  # ── OID4VC Issuance service (SD-JWT OID4VCI) ────────────────────────────────
+  oid4vc-issuance:
+    image: ghcr.io/credebl/oid4vc-issuance:latest
+    container_name: credebl-oid4vc-issuance
+    restart: unless-stopped
+    env_file: .env
+    extra_hosts:
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      issuance:
+        condition: service_started
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── OID4VC Verification service (OID4VP) ─────────────────────────────────────
+  oid4vc-verification:
+    image: ghcr.io/credebl/oid4vc-verification:latest
+    container_name: credebl-oid4vc-verification
+    restart: unless-stopped
+    env_file: .env
+    extra_hosts:
+      "${VPS_IP}": host-gateway
+      "${API_ENDPOINT}": host-gateway
+    depends_on:
+      nats:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      verification:
+        condition: service_started
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
   # ── Ecosystem service ────────────────────────────────────────────────────────
   ecosystem:
     image: ghcr.io/credebl/ecosystem:latest

@@ -1275,11 +1275,11 @@ ssl_update_env() {
     set_env_var "$ENV_FILE" "FRONT_END_URL"         "https://${vps_domain}"
     set_env_var "$ENV_FILE" "SOCKET_HOST"           "https://${vps_domain}"
     set_env_var "$ENV_FILE" "ENABLE_CORS_IP_LIST"   "https://${vps_domain},http://localhost:3000,http://127.0.0.1:3000"
-    # Schema file server: use public hostname so @context URLs in issued credentials
-    # are resolvable by wallets. Port 4000 is published directly (no HTTPS needed
-    # for VC context resolution). Internal services can reach the public hostname.
-    set_env_var "$ENV_FILE" "SCHEMA_FILE_SERVER_URL"             "http://${vps_domain}:4000/schemas/"
-    set_env_var "$ENV_FILE" "NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL" "http://${vps_domain}:4000/schemas/"
+    # Schema file server and MinIO: route through nginx HTTPS proxy so @context URLs
+    # baked into issued credentials and credential offer links are always HTTPS.
+    set_env_var "$ENV_FILE" "SCHEMA_FILE_SERVER_URL"             "https://${vps_domain}/schemas/"
+    set_env_var "$ENV_FILE" "NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL" "https://${vps_domain}/schemas/"
+    set_env_var "$ENV_FILE" "BRAND_LOGO"                         "https://${vps_domain}/credebl-bucket/orgLogos/credebl-logo.png"
   fi
 }
 
@@ -1555,6 +1555,17 @@ server {
         proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
         proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 86400; proxy_buffering off; }
+    location /credebl-bucket/ {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off; }
+    location /schemas/ {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_buffering off; }
     location / {
         proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;
         proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr;
