@@ -137,8 +137,8 @@ write_agent_runtime_env() {
 LEDGER_URL=http://test.bcovrin.vonx.io
 GENESIS_URL=http://test.bcovrin.vonx.io/genesis
 TAILS_FILE_SERVER=https://tails.vonx.io
-AGENT_HTTP_URL=http://${VPS_HOST}
-AGENT_WS_URL=ws://${VPS_HOST}
+AGENT_HTTP_URL=$([ "${ENABLE_SSL:-false}" = "true" ] && echo "https://${VPS_HOST}" || echo "http://${VPS_HOST}")
+AGENT_WS_URL=$([ "${ENABLE_SSL:-false}" = "true" ] && echo "wss://${VPS_HOST}" || echo "ws://${VPS_HOST}")
 CONNECT_TIMEOUT=10
 MAX_CONNECTIONS=1000
 IDLE_TIMEOUT=30000
@@ -1565,6 +1565,19 @@ server {
         proxy_pass http://127.0.0.1:4000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_buffering off; }
+    location /oid4vci/ {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off; }
+    location /wh/ {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_buffering off; }
     location / {
         proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;

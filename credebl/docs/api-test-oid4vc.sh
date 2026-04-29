@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# CDPI PoC — CREDEBL OID4VC E2E test (SD-JWT VC issuance + OID4VP verification)
+# CDPI PoC — CREDEBL OID4VC E2E test (SD-JWT VC issuance via OID4VCI + OID4VP)
 # -----------------------------------------------------------------------------
 # Validates the full OID4VC flow end-to-end via API:
 #
@@ -11,13 +11,13 @@
 #     4. Spin up shared wallet
 #     5. Create DID (did:key) — the only DID method supported for OID4VCI SD-JWT
 #
-#   Steps 6-8 (Issuance — OID4VCI):
+#   Steps 6-8 (Issuance — OID4VCI pre-authorized code flow):
 #     6. Create SD-JWT VC schema (no_ledger type, schema-file-server backed)
-#     7. Issue SD-JWT VC via OOB email  (credentialType=sdjwt)
-#     8. List issued credentials
+#     7. Create OID4VCI issuer + credential template
+#     8. Create credential offer → display openid-credential-offer:// URL + PIN
 #
 #   Steps 9-10 (Verification — OID4VP):
-#     9. Create OOB proof request (OID4VP)
+#     9. Create OOB proof request (presentationExchange)
 #    10. Poll proof state
 #
 # Usage:
@@ -26,14 +26,10 @@
 # Required env vars (auto-read from credebl/.env if present):
 #   VPS_IP, ADMIN_EMAIL, ADMIN_PASSWORD, CRYPTO_PRIVATE_KEY, EMAIL_TO
 #
-# Note on credentialType=sdjwt (step 7):
-#   The SD-JWT issuance backend path is NOT YET AVAILABLE in the current
-#   CREDEBL build. The issuance service only supports "indy" and "jsonld".
-#   PR #1279 (upstream) adds the backend SD-JWT path. Step 7 will return
-#   400/404 "invalid credential type" until that PR is merged and deployed.
-#   Steps 1-6 (schema setup) and steps 9-10 (proof request) work today.
-#   The W3C JSON-LD path (credentialType=jsonld) is validated in
-#   credebl/docs/api-test.sh.
+# Prerequisites (SSL deployment only):
+#   - nginx must proxy /oid4vci/ → Credo admin port 8001 (added by init-credebl.sh)
+#   - AGENT_HTTP_URL in agent.env must be https:// (set by init-credebl.sh when SSL enabled)
+#   - Credo OID4VCI spec requires credential_issuer to be an https:// URL
 # =============================================================================
 
 set -euo pipefail
@@ -64,13 +60,18 @@ ask_if_missing() {
   fi
 }
 
-ask_if_missing "VPS_IP"           "IP del VPS (ej: 161.97.152.40)"
+ask_if_missing "VPS_IP"           "IP o dominio del VPS (ej: 161.97.152.40 o credebl.bootcamp.cdpi.dev)"
 ask_if_missing "ADMIN_EMAIL"      "Email admin (ej: admin@cdpi-poc.local)"
 ask_if_missing "ADMIN_PASSWORD"   "Password admin (valor plano, sin cifrar)"
 ask_if_missing "CRYPTO_PRIVATE_KEY" "Crypto private key"
 ask_if_missing "EMAIL_TO"         "Email del holder (para recibir el offer link)"
 
-BASE_URL="http://$VPS_IP:5000"
+# Use HTTPS if VPS_IP looks like a domain name (has dots but no port and not a bare IP)
+if [[ "$VPS_IP" =~ \. ]] && [[ ! "$VPS_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  BASE_URL="https://$VPS_IP"
+else
+  BASE_URL="http://$VPS_IP:5000"
+fi
 REQUEST_ID="$(date +%s)"
 ORG_NAME="CDPI OID4VC Test $REQUEST_ID"
 SCHEMA_NAME="EmploymentOID4VC$REQUEST_ID"
@@ -249,93 +250,144 @@ fi
 echo "    Schema ID: $SCHEMA_ID"
 
 # ---------------------------------------------------------------------------
-# STEP 7 — Issue SD-JWT VC via OOB email (credentialType=sdjwt)
+# STEP 7 — Create OID4VCI issuer + credential template
 # ---------------------------------------------------------------------------
 echo ""
-echo "[7/10] Issue SD-JWT VC via OOB email (credentialType=sdjwt) → $EMAIL_TO"
-# OID4VCI SD-JWT issuance payload:
-#   - credentialOffer[].attributes: flat key-value list (no @context, no W3C wrapper)
-#   - credentialDefinitionId: the schema ID from step 6 (schema-file-server URL or UUID)
-#   - isReuseConnection: true (wallets reuse existing DIDComm connection if any)
+echo "[7/10] Create OID4VCI issuer + credential template"
+
+# 7a — Create the OID4VCI issuer (maps org + did:key → an OID4VCI credential_issuer endpoint)
 #
-# The server response includes a `credentialOffer` URL in the format:
-#   openid-credential-offer://?credential_offer_uri=http://VPS:5000/...
-# Holders open this URL in an OID4VCI-compatible wallet (Inji, MATTR, etc.)
-# to receive the SD-JWT VC.
-ISSUANCE_PAYLOAD="$(jq -n \
-  --arg email    "$EMAIL_TO" \
-  --arg schemaId "$SCHEMA_ID" \
-  '{
-    credentialOffer:[{
-      emailId:$email,
-      attributes:[
-        {name:"given_name",          value:"María José"},
-        {name:"family_name",         value:"García Pérez"},
-        {name:"document_number",     value:"001-1985031-4"},
-        {name:"employer_name",       value:"Ministerio de Trabajo"},
-        {name:"employment_status",   value:"active"},
-        {name:"position_title",      value:"Técnico en Sistemas"},
-        {name:"employment_start_date", value:"2018-06-01"}
-      ]
-    }],
-    credentialDefinitionId:$schemaId,
-    isReuseConnection:true
-  }')"
+# credentialIssuerHost: the public HTTPS base URL where Credo serves OID4VCI endpoints.
+#   nginx proxies /oid4vci/ → Credo admin port 8001.
+# issuerId: slug used as the path component in all public OID4VCI URLs, e.g.:
+#   https://<host>/oid4vci/<issuerId>/offers/<id>
+#   https://<host>/oid4vci/<issuerId>/.well-known/openid-credential-issuer
+# authorizationServerUrl: Keycloak realm URL (MUST be the public-facing HTTPS URL)
+# batchCredentialIssuanceSize: MUST be ≥ 1 — Credo's OID4VCI draft 15 Zod schema
+#   validates batch_size > 0; passing 0 makes .well-known return server_error.
 
-ISSUE_RESPONSE=""
-ISSUE_STATUS=""
-for attempt in $(seq 1 6); do
-  ISSUE_RESPONSE="$(curl -sS -X POST \
-    "$BASE_URL/orgs/$ORG_ID/credentials/oob/email?credentialType=sdjwt" \
-    "${AUTH[@]}" -d "$ISSUANCE_PAYLOAD")"
-  ISSUE_STATUS="$(echo "$ISSUE_RESPONSE" | jq -r '.statusCode // empty')"
-  [ "$ISSUE_STATUS" = "201" ] && break
-  # 400/404 are definitive failures (not transient) — no point retrying
-  [ "$ISSUE_STATUS" = "400" ] || [ "$ISSUE_STATUS" = "404" ] && break
-  echo "    Attempt $attempt failed (status: ${ISSUE_STATUS:-no_status}), retrying in 5s..."
-  sleep 5
-done
-
-# Step 7 note: credentialType=sdjwt is pending backend PR #1279.
-# Until merged, CREDEBL returns 400 "invalid credential type".
-# We log the failure but do not exit so the rest of the test can run.
-if [ "$ISSUE_STATUS" = "201" ]; then
-  pass "SD-JWT VC issued via OID4VCI OOB (HTTP 201)"
-  OFFER_URL="$(echo "$ISSUE_RESPONSE" | jq -r '.data.credentialOffer // .data.offerUrl // .data.invitationUrl // empty')"
-  if [ -n "$OFFER_URL" ]; then
-    echo ""
-    echo "    ┌─ OID4VCI Credential Offer URL ─────────────────────────────┐"
-    echo "    │ $OFFER_URL"
-    echo "    └────────────────────────────────────────────────────────────┘"
-    echo "    Holder opens this URL in an OID4VCI wallet (e.g. Inji) to"
-    echo "    accept the SD-JWT VC credential."
-  fi
-  ISSUANCE_ID="$(echo "$ISSUE_RESPONSE" | jq -r '.data.id // empty')"
-elif [ "$ISSUE_STATUS" = "400" ] || [ "$ISSUE_STATUS" = "404" ]; then
-  echo "  ⚠ Step 7 skipped — credentialType=sdjwt not yet in backend (PR #1279 pending)"
-  echo "    Response: $(echo "$ISSUE_RESPONSE" | jq -c .message 2>/dev/null || true)"
-else
-  fail "SD-JWT VC issuance" "status=$ISSUE_STATUS — $(echo "$ISSUE_RESPONSE" | jq -c . | head -c 200)"
+ISSUER_SLUG="cdpi-poc-employment-${REQUEST_ID}"
+KEYCLOAK_REALM_URL="${BASE_URL/5000/8080}/realms/credebl-realm"
+# If BASE_URL uses a domain (no port), construct the Keycloak auth URL differently
+if [[ "$BASE_URL" =~ ^https:// ]] && [[ ! "$BASE_URL" =~ :[0-9] ]]; then
+  KC_BASE="${BASE_URL/https:\/\//}"
+  KEYCLOAK_REALM_URL="https://auth.${KC_BASE}/realms/credebl-realm"
 fi
 
+ISSUER_PAYLOAD="$(jq -n \
+  --arg issuerId    "$ISSUER_SLUG" \
+  --arg issuerHost  "$BASE_URL" \
+  --arg orgId       "$ORG_ID" \
+  --arg orgDid      "$ORG_DID" \
+  --arg kcUrl       "$KEYCLOAK_REALM_URL" \
+  '{
+    issuerId: $issuerId,
+    credentialIssuerHost: $issuerHost,
+    orgId: $orgId,
+    orgDid: $orgDid,
+    authorizationServerUrl: $kcUrl,
+    batchCredentialIssuanceSize: 1
+  }')"
+
+ISSUER_RESPONSE="$(curl -sS -X POST \
+  "$BASE_URL/v1/orgs/$ORG_ID/oid4vc/issuers" \
+  "${AUTH[@]}" -d "$ISSUER_PAYLOAD")"
+ISSUER_STATUS="$(echo "$ISSUER_RESPONSE" | jq -r '.statusCode // empty')"
+check_status "OID4VCI issuer created" "$ISSUER_STATUS" "201"
+
+ISSUER_DB_ID="$(echo "$ISSUER_RESPONSE" | jq -r '.data.id // empty')"
+if [ -z "$ISSUER_DB_ID" ]; then
+  fail "Issuer DB ID extraction" "$(echo "$ISSUER_RESPONSE" | jq -c .)"
+  exit 1
+fi
+echo "    Issuer DB ID: $ISSUER_DB_ID"
+echo "    Issuer slug:  $ISSUER_SLUG"
+
+# 7b — Create the credential template (links schema → issuer with SD-JWT attributes)
+#
+# credentialName: label shown in wallet UI
+# type: credential type tag (used as the key in credential_configurations_supported)
+# vct: Verifiable Credential Type URI — must match the schema's schemaLedgerId
+# attributes[].key: SD-JWT claim name (matches schema attributeName)
+# attributes[].value_type: one of "string" | "number" | "boolean"
+
+TEMPLATE_PAYLOAD="$(jq -n \
+  --arg schemaId "$SCHEMA_ID" \
+  '{
+    credentialName: "Employment Credential",
+    type: "EmploymentCredential-sdjwt",
+    vct: $schemaId,
+    attributes: [
+      {key:"given_name",            value_type:"string"},
+      {key:"family_name",           value_type:"string"},
+      {key:"document_number",       value_type:"string"},
+      {key:"employer_name",         value_type:"string"},
+      {key:"employment_status",     value_type:"string"},
+      {key:"position_title",        value_type:"string"},
+      {key:"employment_start_date", value_type:"string"}
+    ]
+  }')"
+
+TEMPLATE_RESPONSE="$(curl -sS -X POST \
+  "$BASE_URL/v1/orgs/$ORG_ID/oid4vc/$ISSUER_DB_ID/template" \
+  "${AUTH[@]}" -d "$TEMPLATE_PAYLOAD")"
+TEMPLATE_STATUS="$(echo "$TEMPLATE_RESPONSE" | jq -r '.statusCode // empty')"
+check_status "Credential template created" "$TEMPLATE_STATUS" "201"
+
+TEMPLATE_ID="$(echo "$TEMPLATE_RESPONSE" | jq -r '.data.id // empty')"
+if [ -z "$TEMPLATE_ID" ]; then
+  fail "Template ID extraction" "$(echo "$TEMPLATE_RESPONSE" | jq -c .)"
+  exit 1
+fi
+echo "    Template ID: $TEMPLATE_ID"
+
 # ---------------------------------------------------------------------------
-# STEP 8 — List issued credentials (sanity check)
+# STEP 8 — Create credential offer (pre-authorized code flow with PIN)
 # ---------------------------------------------------------------------------
 echo ""
-echo "[8/10] List issued credentials"
-LIST_RESPONSE="$(curl -sS \
-  "$BASE_URL/orgs/$ORG_ID/credentials?pageSize=5&pageNumber=1&search=&sortBy=desc&sortField=createDateTime" \
-  -H "Authorization: Bearer $TOKEN")"
-LIST_STATUS="$(echo "$LIST_RESPONSE" | jq -r '.statusCode // empty')"
-TOTAL="$(echo "$LIST_RESPONSE" | jq -r '.data.totalItems // .data.totalRecords // 0')"
-# 404 is expected when the org has no issued credentials (e.g. step 7 was skipped)
-if [ "$LIST_STATUS" = "200" ]; then
-  pass "Credential list endpoint (HTTP 200) — $TOTAL credentials"
-elif [ "$LIST_STATUS" = "404" ]; then
-  echo "  ⚠ Step 8: 404 from credential list — expected when org has no credentials"
-  PASS=$((PASS + 1))
-else
-  fail "Credential list endpoint" "status=$LIST_STATUS"
+echo "[8/10] Create OID4VCI credential offer (pre-authorized code, PIN-protected)"
+
+# The offer payload specifies the credential data for a single holder.
+# pin: user PIN the wallet must send to exchange the pre-authorized code.
+# credentialData: flat object with the holder's SD-JWT claims.
+# templateId: links the offer to the correct credential_configurations_supported entry.
+OFFER_PAYLOAD="$(jq -n \
+  --arg templateId  "$TEMPLATE_ID" \
+  '{
+    credentialData: {
+      given_name:            "Carlos",
+      family_name:           "Gomez Restrepo",
+      document_number:       "1234567890",
+      employer_name:         "MINTIC Colombia",
+      employment_status:     "active",
+      position_title:        "Ingeniero de Software",
+      employment_start_date: "2021-03-15"
+    },
+    pin: "1234",
+    templateId: $templateId
+  }')"
+
+OFFER_RESPONSE="$(curl -sS -X POST \
+  "$BASE_URL/v1/orgs/$ORG_ID/oid4vc/$ISSUER_DB_ID/create-offer" \
+  "${AUTH[@]}" -d "$OFFER_PAYLOAD")"
+OFFER_STATUS="$(echo "$OFFER_RESPONSE" | jq -r '.statusCode // empty')"
+check_status "Credential offer created" "$OFFER_STATUS" "201"
+
+OFFER_URL="$(echo "$OFFER_RESPONSE" | jq -r '.data.offerUrl // .data.credentialOffer // .data.invitationUrl // empty')"
+OFFER_PIN="$(echo "$OFFER_RESPONSE" | jq -r '.data.pin // "1234"')"
+
+if [ -n "$OFFER_URL" ]; then
+  echo ""
+  echo "    ┌─ OID4VCI Credential Offer (pre-authorized code) ───────────────┐"
+  echo "    │ $OFFER_URL"
+  echo "    ├────────────────────────────────────────────────────────────────┤"
+  echo "    │ PIN: $OFFER_PIN"
+  echo "    └────────────────────────────────────────────────────────────────┘"
+  echo "    Holder opens this URL in an OID4VCI wallet (e.g. Inji, MATTR)"
+  echo "    and enters the PIN when prompted to receive the SD-JWT VC."
+  echo ""
+  echo "    Public OID4VCI metadata:"
+  echo "    ${BASE_URL}/oid4vci/${ISSUER_SLUG}/.well-known/openid-credential-issuer"
 fi
 
 # ---------------------------------------------------------------------------
