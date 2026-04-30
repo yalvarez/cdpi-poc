@@ -315,9 +315,10 @@ echo "    Issuer slug:  $ISSUER_SLUG"
 TEMPLATE_PAYLOAD="$(jq -n \
   --arg schemaId "$SCHEMA_ID" \
   '{
-    credentialName: "Employment Credential",
-    type: "EmploymentCredential-sdjwt",
-    vct: $schemaId,
+    name:   "Employment Credential",
+    type:   "EmploymentCredential-sdjwt",
+    format: "dc+sd-jwt",
+    vct:    $schemaId,
     attributes: [
       {key:"given_name",            value_type:"string"},
       {key:"family_name",           value_type:"string"},
