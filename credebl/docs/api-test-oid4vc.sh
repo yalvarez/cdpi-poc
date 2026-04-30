@@ -286,7 +286,8 @@ ISSUER_PAYLOAD="$(jq -n \
     orgId: $orgId,
     orgDid: $orgDid,
     authorizationServerUrl: $kcUrl,
-    batchCredentialIssuanceSize: 1
+    batchCredentialIssuanceSize: 1,
+    display: [{name: "CDPI PoC Employment Issuer", locale: "en"}]
   }')"
 
 ISSUER_RESPONSE="$(curl -sS -X POST \

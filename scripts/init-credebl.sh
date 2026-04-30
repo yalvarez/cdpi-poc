@@ -1432,7 +1432,8 @@ ensure_oid4vc_employment_issuer() {
       orgId:                     $orgId,
       orgDid:                    $orgDid,
       authorizationServerUrl:    $kcUrl,
-      batchCredentialIssuanceSize: 1
+      batchCredentialIssuanceSize: 1,
+      display: [{name: "CDPI PoC Employment Issuer", locale: "en"}]
     }')"
 
   issuer_resp="$(curl -sf -X POST "$credebl_url/v1/orgs/$org_id/oid4vc/issuers" "${auth_h[@]}" \
