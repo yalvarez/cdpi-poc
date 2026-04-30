@@ -466,7 +466,7 @@ if [ "$PROOF_STATUS" = "201" ]; then
   # Query the proof list and take the most recently created presentationId.
   # The single-proof endpoint uses presentationId, not the list's id field.
   PROOF_ID="$(curl -sS "$BASE_URL/v1/orgs/$ORG_ID/proofs" -H "Authorization: Bearer $TOKEN" \
-    | jq -r '.data.data | sort_by(.createDateTime) | last | .presentationId // empty' 2>/dev/null)"
+    | jq -r '(.data.data // []) | sort_by(.createDateTime) | last | .presentationId // empty' 2>/dev/null)" || PROOF_ID=""
   echo "    Proof ID: $PROOF_ID"
   if [ -n "$PROOF_URL" ]; then
     echo ""
