@@ -1242,6 +1242,247 @@ process.stdout.write(encrypted);
 }
 
 # =============================================================================
+# OID4VCI EMPLOYMENT ISSUER SETUP
+# =============================================================================
+
+ensure_oid4vc_employment_issuer() {
+  echo
+  echo "Ensuring OID4VCI employment issuer (cdpi-poc-employment)..."
+
+  # Idempotency: skip if issuer already configured in DB
+  local existing
+  existing="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -Atqc \
+    "SELECT id FROM oidc_issuer WHERE \"publicIssuerId\" = 'cdpi-poc-employment' LIMIT 1;" \
+    2>/dev/null | tr -d '\r\n')"
+
+  if [ -n "$existing" ]; then
+    echo "  OID4VCI issuer 'cdpi-poc-employment' already exists — skipping."
+    return 0
+  fi
+
+  # OID4VCI requires HTTPS for credential_issuer URL (Credo spec validation)
+  if [ "${ENABLE_SSL:-false}" != "true" ]; then
+    echo "  WARNING: SSL not enabled — OID4VCI credential_issuer must be HTTPS." >&2
+    echo "           Skipping OID4VCI issuer setup. Re-run init-credebl.sh after enabling SSL." >&2
+    return 0
+  fi
+
+  local credebl_url="https://${VPS_HOST}"
+  local kc_url="https://auth.${VPS_HOST}/realms/credebl-realm"
+
+  # Encrypt admin password (CryptoJS-compatible AES via OpenSSL)
+  local enc_password
+  enc_password="$(printf '%s' "$(jq -Rn --arg p "$PLATFORM_ADMIN_INITIAL_PASSWORD" '$p')" \
+    | openssl enc -aes-256-cbc -salt -base64 -A -md md5 \
+    -pass "pass:$CRYPTO_PRIVATE_KEY" 2>/dev/null)"
+
+  # Sign in to CREDEBL API
+  local token
+  token="$(curl -sf -X POST "$credebl_url/v1/auth/signin" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$PLATFORM_ADMIN_EMAIL\",\"password\":\"$enc_password\"}" \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["access_token"])' \
+    2>/dev/null)"
+
+  if [ -z "$token" ]; then
+    echo "  ERROR: Sign-in to CREDEBL failed — skipping OID4VCI issuer setup." >&2
+    return 1
+  fi
+
+  local auth_h=(-H "Authorization: Bearer $token" -H "Content-Type: application/json")
+
+  # Create org — reuse if already exists (handles partial failures on re-runs)
+  local org_id
+  org_id="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -Atqc \
+    "SELECT id FROM organisation WHERE name = 'CDPI PoC Employment' LIMIT 1;" \
+    2>/dev/null | tr -d '\r\n')"
+
+  if [ -z "$org_id" ]; then
+    local org_resp
+    org_resp="$(curl -sf -X POST "$credebl_url/v1/orgs" "${auth_h[@]}" \
+      -d '{"name":"CDPI PoC Employment","description":"CDPI employment credential issuer","website":"https://cdpi.dev","countryId":null,"stateId":null,"cityId":null,"logo":""}' \
+      2>/dev/null)"
+    org_id="$(echo "$org_resp" | python3 -c \
+      'import sys,json; print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)"
+
+    if [ -z "$org_id" ]; then
+      echo "  ERROR: Org creation failed." >&2
+      echo "$org_resp" >&2
+      return 1
+    fi
+    echo "  Org created: $org_id"
+  else
+    echo "  Org already exists: $org_id"
+  fi
+
+  # Provision shared wallet if not already done
+  local agent_status
+  agent_status="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -Atqc \
+    "SELECT \"agentSpinUpStatus\" FROM org_agents WHERE \"orgId\" = '$org_id' LIMIT 1;" \
+    2>/dev/null | tr -d '\r\n ')"
+
+  if [ "$agent_status" != "2" ]; then
+    echo "  Provisioning shared wallet..."
+    curl -sf -X POST "$credebl_url/v1/orgs/$org_id/agents/wallet" "${auth_h[@]}" \
+      -d "{\"label\":\"cdpi-poc-employment-wallet\",\"clientSocketId\":\"\"}" >/dev/null 2>&1 || true
+
+    echo "  Waiting for wallet to be ready (up to 5 min)..."
+    local i
+    for i in $(seq 1 60); do
+      agent_status="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+        psql -U credebl -d credebl -Atqc \
+        "SELECT \"agentSpinUpStatus\" FROM org_agents WHERE \"orgId\" = '$org_id' LIMIT 1;" \
+        2>/dev/null | tr -d '\r\n ')"
+      [ "$agent_status" = "2" ] && break
+      sleep 5
+    done
+
+    if [ "$agent_status" != "2" ]; then
+      echo "  ERROR: Wallet provisioning timed out (status=$agent_status)." >&2
+      return 1
+    fi
+    echo "  Wallet ready."
+  else
+    echo "  Wallet already provisioned."
+  fi
+
+  # Create did:key if not already registered
+  local org_did
+  org_did="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -U credebl -d credebl -Atqc \
+    "SELECT \"orgDid\" FROM org_agents WHERE \"orgId\" = '$org_id' AND \"orgDid\" IS NOT NULL LIMIT 1;" \
+    2>/dev/null | tr -d '\r\n')"
+
+  if [ -z "$org_did" ]; then
+    echo "  Creating did:key..."
+    local did_seed
+    did_seed="$(openssl rand -hex 16)"
+    curl -sf -X POST "$credebl_url/v1/orgs/$org_id/agents/did" "${auth_h[@]}" \
+      -d "{\"seed\":\"$did_seed\",\"keyType\":\"ed25519\",\"method\":\"key\",\"ledger\":\"\",\"privatekey\":\"\",\"network\":\"\",\"domain\":\"\",\"role\":\"\",\"endorserDid\":\"\",\"clientSocketId\":\"\",\"isPrimaryDid\":true}" \
+      >/dev/null 2>&1 || true
+
+    echo "  Waiting for DID to be registered..."
+    for i in $(seq 1 20); do
+      org_did="$(docker compose exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+        psql -U credebl -d credebl -Atqc \
+        "SELECT \"orgDid\" FROM org_agents WHERE \"orgId\" = '$org_id' AND \"orgDid\" IS NOT NULL LIMIT 1;" \
+        2>/dev/null | tr -d '\r\n')"
+      [ -n "$org_did" ] && break
+      sleep 3
+    done
+
+    if [ -z "$org_did" ]; then
+      echo "  ERROR: DID registration timed out." >&2
+      return 1
+    fi
+    echo "  DID: $org_did"
+  else
+    echo "  DID already registered: $org_did"
+  fi
+
+  # Create employment schema (no_ledger — stored in schema-file-server)
+  echo "  Creating employment schema (no_ledger)..."
+  local schema_payload schema_resp schema_id
+  schema_payload="$(jq -n --arg orgId "$org_id" '{
+    type: "json",
+    schemaPayload: {
+      schemaName: "EmploymentCredential",
+      schemaType: "no_ledger",
+      attributes: [
+        {attributeName:"given_name",            schemaDataType:"string", displayName:"Given Name",        isRequired:true},
+        {attributeName:"family_name",           schemaDataType:"string", displayName:"Family Name",       isRequired:true},
+        {attributeName:"document_number",       schemaDataType:"string", displayName:"Document Number",   isRequired:false},
+        {attributeName:"employer_name",         schemaDataType:"string", displayName:"Employer Name",     isRequired:true},
+        {attributeName:"employment_status",     schemaDataType:"string", displayName:"Employment Status", isRequired:true},
+        {attributeName:"position_title",        schemaDataType:"string", displayName:"Position Title",    isRequired:true},
+        {attributeName:"employment_start_date", schemaDataType:"string", displayName:"Start Date",        isRequired:true}
+      ],
+      description: "CDPI PoC SD-JWT VC employment credential",
+      orgId: $orgId
+    }
+  }')"
+
+  schema_resp="$(curl -sf -X POST "$credebl_url/v1/orgs/$org_id/schemas" "${auth_h[@]}" \
+    -d "$schema_payload" 2>/dev/null)"
+  schema_id="$(echo "$schema_resp" | python3 -c \
+    'import sys,json; d=json.load(sys.stdin)["data"]; print(d.get("schemaLedgerId") or d.get("id",""))' \
+    2>/dev/null)"
+
+  if [ -z "$schema_id" ]; then
+    echo "  ERROR: Schema creation failed." >&2
+    echo "$schema_resp" >&2
+    return 1
+  fi
+  echo "  Schema ID: $schema_id"
+
+  # Create OID4VCI issuer with slug cdpi-poc-employment
+  echo "  Creating OID4VCI issuer..."
+  local issuer_payload issuer_resp issuer_id
+  issuer_payload="$(jq -n \
+    --arg orgId      "$org_id" \
+    --arg orgDid     "$org_did" \
+    --arg kcUrl      "$kc_url" \
+    --arg issuerHost "$credebl_url" \
+    '{
+      issuerId:                  "cdpi-poc-employment",
+      credentialIssuerHost:      $issuerHost,
+      orgId:                     $orgId,
+      orgDid:                    $orgDid,
+      authorizationServerUrl:    $kcUrl,
+      batchCredentialIssuanceSize: 1
+    }')"
+
+  issuer_resp="$(curl -sf -X POST "$credebl_url/v1/orgs/$org_id/oid4vc/issuers" "${auth_h[@]}" \
+    -d "$issuer_payload" 2>/dev/null)"
+  issuer_id="$(echo "$issuer_resp" | python3 -c \
+    'import sys,json; print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)"
+
+  if [ -z "$issuer_id" ]; then
+    echo "  ERROR: OID4VCI issuer creation failed." >&2
+    echo "$issuer_resp" >&2
+    return 1
+  fi
+  echo "  Issuer DB ID: $issuer_id"
+
+  # Create credential template linking schema → issuer
+  echo "  Creating credential template..."
+  local template_payload template_resp template_id
+  template_payload="$(jq -n --arg schemaId "$schema_id" '{
+    credentialName: "Employment Credential",
+    type:           "EmploymentCredential-sdjwt",
+    vct:            $schemaId,
+    attributes: [
+      {key:"given_name",            value_type:"string"},
+      {key:"family_name",           value_type:"string"},
+      {key:"document_number",       value_type:"string"},
+      {key:"employer_name",         value_type:"string"},
+      {key:"employment_status",     value_type:"string"},
+      {key:"position_title",        value_type:"string"},
+      {key:"employment_start_date", value_type:"string"}
+    ]
+  }')"
+
+  template_resp="$(curl -sf -X POST "$credebl_url/v1/orgs/$org_id/oid4vc/$issuer_id/template" "${auth_h[@]}" \
+    -d "$template_payload" 2>/dev/null)"
+  template_id="$(echo "$template_resp" | python3 -c \
+    'import sys,json; print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)"
+
+  if [ -z "$template_id" ]; then
+    echo "  ERROR: Credential template creation failed." >&2
+    echo "$template_resp" >&2
+    return 1
+  fi
+
+  echo "  Template ID: $template_id"
+  echo "  OID4VCI issuer setup complete!"
+  echo "  Metadata: $credebl_url/oid4vci/cdpi-poc-employment/.well-known/openid-credential-issuer"
+  echo "  Issue:    bash credebl/docs/issue-credential.sh"
+}
+
+# =============================================================================
 # SSL / NGINX FUNCTIONS
 # =============================================================================
 # All logic from the former setup-keycloak-https.sh is inlined here.
@@ -2245,6 +2486,8 @@ WHERE u.email = '${PLATFORM_ADMIN_EMAIL}'
   );
 " >/dev/null
 echo "  Platform admin owner role ensured."
+
+ensure_oid4vc_employment_issuer
 
 # Seed client_aliases so Studio's /auth/verification-mail?clientAlias=CREDEBL works.
 # CREDEBL sends clientAlias=CREDEBL on every user registration email. Without a matching

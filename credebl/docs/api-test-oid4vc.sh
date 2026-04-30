@@ -149,7 +149,7 @@ CREATE_ORG_PAYLOAD="$(jq -n \
   '{name:$name, description:"OID4VC test org", website:"https://cdpi-poc.local",
     countryId:null, stateId:null, cityId:null, logo:""}')"
 
-CREATE_ORG_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs" "${AUTH[@]}" -d "$CREATE_ORG_PAYLOAD")"
+CREATE_ORG_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs" "${AUTH[@]}" -d "$CREATE_ORG_PAYLOAD")"
 ORG_ID="$(echo "$CREATE_ORG_RESPONSE" | jq -r '.data.id // .id // empty')"
 
 if [ -z "$ORG_ID" ]; then
@@ -164,7 +164,7 @@ pass "Org created: $ORG_ID"
 echo ""
 echo "[4/10] Spin up shared wallet"
 WALLET_PAYLOAD="$(jq -n --arg label "OID4VCWallet$REQUEST_ID" '{label:$label, clientSocketId:""}')"
-WALLET_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/agents/wallet" "${AUTH[@]}" -d "$WALLET_PAYLOAD")"
+WALLET_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/agents/wallet" "${AUTH[@]}" -d "$WALLET_PAYLOAD")"
 WALLET_STATUS="$(echo "$WALLET_RESPONSE" | jq -r '.statusCode // empty')"
 check_status "Shared wallet provisioned" "$WALLET_STATUS" "201"
 
@@ -185,7 +185,7 @@ DID_PAYLOAD="{\"seed\":\"$DID_SEED\",\"keyType\":\"ed25519\",\"method\":\"key\",
   \"ledger\":\"\",\"privatekey\":\"\",\"network\":\"\",\"domain\":\"\",
   \"role\":\"\",\"endorserDid\":\"\",\"clientSocketId\":\"\",\"isPrimaryDid\":true}"
 
-DID_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/agents/did" "${AUTH[@]}" -d "$DID_PAYLOAD")"
+DID_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/agents/did" "${AUTH[@]}" -d "$DID_PAYLOAD")"
 DID_STATUS="$(echo "$DID_RESPONSE" | jq -r '.statusCode // empty')"
 check_status "DID creation accepted" "$DID_STATUS" "201"
 
@@ -193,7 +193,7 @@ check_status "DID creation accepted" "$DID_STATUS" "201"
 ORG_DID=""
 echo "    Waiting for DID to be registered..."
 for _ in $(seq 1 20); do
-  ORG_RESPONSE="$(curl -sS "$BASE_URL/orgs/$ORG_ID" -H "Authorization: Bearer $TOKEN")"
+  ORG_RESPONSE="$(curl -sS "$BASE_URL/v1/orgs/$ORG_ID" -H "Authorization: Bearer $TOKEN")"
   ORG_DID="$(echo "$ORG_RESPONSE" | jq -r '.data.org_agents[0].orgDid // empty')"
   [ -n "$ORG_DID" ] && break
   sleep 3
@@ -238,7 +238,7 @@ SCHEMA_PAYLOAD="$(jq -n \
     }
   }')"
 
-SCHEMA_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/schemas" "${AUTH[@]}" -d "$SCHEMA_PAYLOAD")"
+SCHEMA_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/schemas" "${AUTH[@]}" -d "$SCHEMA_PAYLOAD")"
 SCHEMA_STATUS="$(echo "$SCHEMA_RESPONSE" | jq -r '.statusCode // empty')"
 check_status "SD-JWT schema created" "$SCHEMA_STATUS" "201"
 
@@ -347,24 +347,28 @@ echo "    Template ID: $TEMPLATE_ID"
 echo ""
 echo "[8/10] Create OID4VCI credential offer (pre-authorized code, PIN-protected)"
 
-# The offer payload specifies the credential data for a single holder.
-# pin: user PIN the wallet must send to exchange the pre-authorized code.
-# credentialData: flat object with the holder's SD-JWT claims.
-# templateId: links the offer to the correct credential_configurations_supported entry.
+# The offer payload wraps credential data inside credentials[].payload.
+# authorizationType: "preAuthorizedCodeFlow" for pre-auth code flow.
+# pin: user PIN the wallet sends when exchanging the pre-authorized code.
+# credentials[].templateId: links to the correct credential_configurations_supported entry.
+# credentials[].payload: flat object with the holder's SD-JWT claims.
 OFFER_PAYLOAD="$(jq -n \
   --arg templateId  "$TEMPLATE_ID" \
   '{
-    credentialData: {
-      given_name:            "Carlos",
-      family_name:           "Gomez Restrepo",
-      document_number:       "1234567890",
-      employer_name:         "MINTIC Colombia",
-      employment_status:     "active",
-      position_title:        "Ingeniero de Software",
-      employment_start_date: "2021-03-15"
-    },
+    authorizationType: "preAuthorizedCodeFlow",
     pin: "1234",
-    templateId: $templateId
+    credentials: [{
+      templateId: $templateId,
+      payload: {
+        given_name:            "Carlos",
+        family_name:           "Gomez Restrepo",
+        document_number:       "1234567890",
+        employer_name:         "MINTIC Colombia",
+        employment_status:     "active",
+        position_title:        "Ingeniero de Software",
+        employment_start_date: "2021-03-15"
+      }
+    }]
   }')"
 
 OFFER_RESPONSE="$(curl -sS -X POST \
@@ -373,8 +377,8 @@ OFFER_RESPONSE="$(curl -sS -X POST \
 OFFER_STATUS="$(echo "$OFFER_RESPONSE" | jq -r '.statusCode // empty')"
 check_status "Credential offer created" "$OFFER_STATUS" "201"
 
-OFFER_URL="$(echo "$OFFER_RESPONSE" | jq -r '.data.offerUrl // .data.credentialOffer // .data.invitationUrl // empty')"
-OFFER_PIN="$(echo "$OFFER_RESPONSE" | jq -r '.data.pin // "1234"')"
+OFFER_URL="$(echo "$OFFER_RESPONSE" | jq -r '.data.credentialOffer // .data.offerUrl // .data.invitationUrl // empty')"
+OFFER_PIN="$(echo "$OFFER_RESPONSE" | jq -r '.data.issuanceSession.userPin // .data.pin // "1234"')"
 
 if [ -n "$OFFER_URL" ]; then
   echo ""
