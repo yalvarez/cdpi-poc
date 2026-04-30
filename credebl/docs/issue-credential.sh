@@ -75,7 +75,6 @@ if [ ! -f "$VPS_ENV" ]; then
 fi
 
 AGENT_API_KEY="$(grep '^AGENT_API_KEY=' "$VPS_ENV" | cut -d= -f2)"
-POSTGRES_PASSWORD="$(grep '^POSTGRES_PASSWORD=' "$VPS_ENV" | cut -d= -f2)"
 
 if [ -z "$AGENT_API_KEY" ]; then
   echo "ERROR: AGENT_API_KEY vacío en $VPS_ENV" >&2
@@ -93,7 +92,7 @@ ROOT_JWT="$(curl -sf -X POST "$CREDO_URL/agent/token" \
 }
 
 if [ -z "$TENANT_ID" ]; then
-  TENANT_ID="$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U credebl -d credebl -tAc \
+  TENANT_ID="$(docker exec credebl-postgres psql -U credebl -d credebl -tAc \
     "SELECT oa.\"tenantId\" FROM org_agents oa
      JOIN oidc_issuer oi ON oi.\"orgAgentId\" = oa.id
      WHERE oi.\"publicIssuerId\" = '$ISSUER_SLUG'
@@ -114,25 +113,6 @@ TENANT_JWT="$(curl -sf -X POST "$CREDO_URL/multi-tenancy/get-token/$TENANT_ID" \
 ISSUER_META="$(curl -sf "$CREDO_URL/openid4vc/issuer/$ISSUER_SLUG" \
   -H "Authorization: Bearer $TENANT_JWT")"
 
-read -r CRED_SUPPORTED_ID VCT SIGNER_DID KC_URL < <(python3 - "$ISSUER_SLUG" <<'PYEOF'
-import sys, json
-
-raw = sys.stdin.read()
-# issuer meta was already printed to stdout before this heredoc runs;
-# we receive it via stdin when called from process substitution below
-data = json.loads(raw)
-cfgs = data.get("credentialConfigurationsSupported", {})
-cred_id = next(iter(cfgs), "EmploymentCredential-sdjwt")
-cfg = cfgs.get(cred_id, {})
-vct = cfg.get("vct", "")
-signer_did = ""
-# extract KC URL from scope or fall back to empty
-kc_url = ""
-print(cred_id, vct, signer_did, kc_url)
-PYEOF
-) 2>/dev/null || true
-
-# Use python3 more robustly via temp file approach
 CRED_SUPPORTED_ID="$(echo "$ISSUER_META" | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
@@ -148,7 +128,7 @@ cfg = next(iter(cfgs.values()), {})
 print(cfg.get("vct", ""))
 ')"
 
-SIGNER_DID="$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U credebl -d credebl -tAc \
+SIGNER_DID="$(docker exec credebl-postgres psql -U credebl -d credebl -tAc \
   "SELECT oa.\"orgDid\" FROM org_agents oa
    JOIN oidc_issuer oi ON oi.\"orgAgentId\" = oa.id
    WHERE oi.\"publicIssuerId\" = '$ISSUER_SLUG'
