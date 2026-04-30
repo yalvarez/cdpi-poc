@@ -455,7 +455,7 @@ PROOF_PAYLOAD="$(jq -n \
     autoAcceptProof:"always"
   }')"
 
-PROOF_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/proofs/oob?requestType=presentationExchange" "${AUTH[@]}" -d "$PROOF_PAYLOAD")"
+PROOF_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/proofs/oob?requestType=presentationExchange" "${AUTH[@]}" -d "$PROOF_PAYLOAD")"
 PROOF_STATUS="$(echo "$PROOF_RESPONSE" | jq -r '.statusCode // empty')"
 check_status "OID4VP proof request created" "$PROOF_STATUS" "201"
 
@@ -465,7 +465,7 @@ if [ "$PROOF_STATUS" = "201" ]; then
   # CREDEBL's oob proof endpoint only returns invitationUrl — no ID in the response.
   # Query the proof list and take the most recently created presentationId.
   # The single-proof endpoint uses presentationId, not the list's id field.
-  PROOF_ID="$(curl -sS "$BASE_URL/orgs/$ORG_ID/proofs" -H "Authorization: Bearer $TOKEN" \
+  PROOF_ID="$(curl -sS "$BASE_URL/v1/orgs/$ORG_ID/proofs" -H "Authorization: Bearer $TOKEN" \
     | jq -r '.data.data | sort_by(.createDateTime) | last | .presentationId // empty' 2>/dev/null)"
   echo "    Proof ID: $PROOF_ID"
   if [ -n "$PROOF_URL" ]; then
@@ -485,7 +485,7 @@ if [ -n "$PROOF_ID" ]; then
   echo "[10/10] Poll proof state (3 attempts — needs holder to present in wallet)"
   for i in 1 2 3; do
     sleep 5
-    STATE_RESPONSE="$(curl -sS "$BASE_URL/orgs/$ORG_ID/proofs/$PROOF_ID" -H "Authorization: Bearer $TOKEN")"
+    STATE_RESPONSE="$(curl -sS "$BASE_URL/v1/orgs/$ORG_ID/proofs/$PROOF_ID" -H "Authorization: Bearer $TOKEN")"
     PROOF_STATE="$(echo "$STATE_RESPONSE" | jq -r '.data.state // .state // "unknown"')"
     echo "    Attempt $i — state: $PROOF_STATE"
     if [ "$PROOF_STATE" = "done" ] || [ "$PROOF_STATE" = "verified" ]; then
