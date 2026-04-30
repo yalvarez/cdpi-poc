@@ -419,7 +419,7 @@ echo "[9/10] Create OOB proof request (presentationExchange)"
 PROOF_PAYLOAD="$(jq -n \
   --arg schemaId "$SCHEMA_ID" \
   '{
-    comment:"Employment verification — CDPI PoC OID4VP test",
+    comment:"Employment verification - CDPI PoC OID4VP test",
     protocolVersion:"v2",
     presentationDefinition:{
       id:"employment-verification-001",
