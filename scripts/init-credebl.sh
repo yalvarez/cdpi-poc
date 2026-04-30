@@ -1452,19 +1452,21 @@ ensure_oid4vc_employment_issuer() {
   echo "  Creating credential template..."
   local template_payload template_resp template_id
   template_payload="$(jq -n --arg schemaId "$schema_id" '{
-    name:   "Employment Credential",
-    type:   "EmploymentCredential-sdjwt",
-    format: "dc+sd-jwt",
-    vct:    $schemaId,
-    attributes: [
-      {key:"given_name",            value_type:"string"},
-      {key:"family_name",           value_type:"string"},
-      {key:"document_number",       value_type:"string"},
-      {key:"employer_name",         value_type:"string"},
-      {key:"employment_status",     value_type:"string"},
-      {key:"position_title",        value_type:"string"},
-      {key:"employment_start_date", value_type:"string"}
-    ]
+    name:        "Employment Credential",
+    format:      "dc+sd-jwt",
+    canBeRevoked: false,
+    template: {
+      vct: $schemaId,
+      attributes: [
+        {key:"given_name",            value_type:"string"},
+        {key:"family_name",           value_type:"string"},
+        {key:"document_number",       value_type:"string"},
+        {key:"employer_name",         value_type:"string"},
+        {key:"employment_status",     value_type:"string"},
+        {key:"position_title",        value_type:"string"},
+        {key:"employment_start_date", value_type:"string"}
+      ]
+    }
   }')"
 
   template_resp="$(curl -sf -X POST "$credebl_url/v1/orgs/$org_id/oid4vc/$issuer_id/template" "${auth_h[@]}" \
