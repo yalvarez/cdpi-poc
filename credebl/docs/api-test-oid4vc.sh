@@ -315,8 +315,9 @@ echo "    Issuer slug:  $ISSUER_SLUG"
 TEMPLATE_PAYLOAD="$(jq -n \
   --arg schemaId "$SCHEMA_ID" \
   '{
-    name:        "Employment Credential",
-    format:      "dc+sd-jwt",
+    name:         "Employment Credential",
+    format:       "dc+sd-jwt",
+    signerOption: "DID",
     canBeRevoked: false,
     template: {
       vct: $schemaId,
