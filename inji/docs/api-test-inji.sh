@@ -118,11 +118,13 @@ esignet_post() {
   local jar="/tmp/inji_test_cookies_$$"
   local xsrf
   xsrf=$(get_xsrf "$jar")
-  curl -sf -X POST "${ESIGNET_BASE}${endpoint}" \
+  # Use -s (silent) without -f so non-2xx responses are captured rather than
+  # causing curl to exit with code 22, which would kill the script via set -e.
+  curl -s -X POST "${ESIGNET_BASE}${endpoint}" \
     -H "Content-Type: application/json" \
     -H "X-XSRF-TOKEN: ${xsrf}" \
     -b "XSRF-TOKEN=${xsrf}" \
-    -d "$body" 2>/dev/null
+    -d "$body" 2>/dev/null || true
 }
 
 echo ""
@@ -422,7 +424,7 @@ else
 JAR="/tmp/inji_token_jar_$$"
 XSRF=$(get_xsrf "$JAR")
 
-TOKEN_RESP=$(curl -sf -X POST "${ESIGNET_BASE}/oauth/v2/token" \
+TOKEN_RESP=$(curl -s -X POST "${ESIGNET_BASE}/oauth/v2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "X-XSRF-TOKEN: ${XSRF}" \
   -b "XSRF-TOKEN=${XSRF}" \
@@ -459,7 +461,7 @@ elif [ -z "${ACCESS_TOKEN:-}" ]; then
   fail "Credential request" "No access_token from step 11"
 else
 
-CRED_RESP=$(curl -sf -X POST "$CREDENTIAL_ENDPOINT" \
+CRED_RESP=$(curl -s -X POST "$CREDENTIAL_ENDPOINT" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -d '{"format":"vc+sd-jwt","credential_definition":{"type":["VerifiableCredential","EmploymentCertification"]}}' 2>/dev/null) || CRED_RESP=""
