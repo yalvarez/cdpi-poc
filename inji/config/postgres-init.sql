@@ -218,5 +218,89 @@ ON CONFLICT (app_id) DO NOTHING;
 
 RESET search_path;
 
+-- Keymanager tables for certify
+-- certify uses ddl-auto=update (Hibernate creates tables), but with wrong column sizes.
+-- Pre-creating the tables here ensures correct column sizes before certify starts.
+-- key_store.certificate_data and private_key must be TEXT — certificate DER is larger than 255 chars.
+-- key_alias.uni_ident must be varchar(512) — same UUID-derived identifier issue as mimoto.
+SET search_path TO certify;
+
+CREATE TABLE IF NOT EXISTS key_alias (
+    id                character varying(36)       NOT NULL,
+    app_id            character varying(36)       NOT NULL,
+    ref_id            character varying(128),
+    key_gen_dtimes    timestamp without time zone,
+    key_expire_dtimes timestamp without time zone,
+    status_code       character varying(36),
+    cert_thumbprint   character varying(128),
+    uni_ident         character varying(512),
+    cr_by             character varying(256),
+    cr_dtimes         timestamp without time zone,
+    upd_by            character varying(256),
+    upd_dtimes        timestamp without time zone,
+    is_deleted        boolean                     DEFAULT false,
+    del_dtimes        timestamp without time zone,
+    CONSTRAINT certify_key_alias_pkey PRIMARY KEY (id),
+    CONSTRAINT certify_uni_ident_const UNIQUE (uni_ident)
+);
+
+CREATE TABLE IF NOT EXISTS key_store (
+    id                character varying(36)       NOT NULL,
+    master_key        character varying(36),
+    private_key       TEXT,
+    certificate_data  TEXT,
+    cr_by             character varying(256),
+    cr_dtimes         timestamp without time zone,
+    upd_by            character varying(256),
+    upd_dtimes        timestamp without time zone,
+    is_deleted        boolean                     DEFAULT false,
+    del_dtimes        timestamp without time zone,
+    CONSTRAINT certify_key_store_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS key_policy_def (
+    app_id                character varying(36)       NOT NULL,
+    key_validity_duration smallint,
+    is_active             boolean                     NOT NULL DEFAULT true,
+    pre_expire_days       smallint,
+    access_allowed        character varying(1024),
+    cr_by                 character varying(256)      NOT NULL DEFAULT 'System',
+    cr_dtimes             timestamp without time zone NOT NULL DEFAULT NOW(),
+    upd_by                character varying(256),
+    upd_dtimes            timestamp without time zone,
+    is_deleted            boolean                     DEFAULT false,
+    del_dtimes            timestamp without time zone,
+    CONSTRAINT certify_key_policy_def_pkey PRIMARY KEY (app_id)
+);
+
+-- ShedLock table used by StatusListUpdateBatchJob scheduled task
+CREATE TABLE IF NOT EXISTS shedlock (
+    name       CHARACTER VARYING(64)       NOT NULL,
+    lock_until TIMESTAMP WITHOUT TIME ZONE,
+    locked_at  TIMESTAMP WITHOUT TIME ZONE,
+    locked_by  CHARACTER VARYING(255),
+    PRIMARY KEY (name)
+);
+
+-- Key policies required by certify AppConfig.initKeys() on startup.
+-- Discovered by decompiling AppConfig.class — these are all the app_ids checked:
+--   ROOT, CERTIFY_SERVICE (master), CERTIFY_SERVICE#TRANSACTION_CACHE (uses BASE policy),
+--   CERTIFY_PARTNER, CERTIFY_VC_SIGN_RSA, CERTIFY_VC_SIGN_EC_K1, CERTIFY_VC_SIGN_EC_R1,
+--   CERTIFY_VC_SIGN_ED25519.
+INSERT INTO certify.key_policy_def
+  (app_id, key_validity_duration, is_active, pre_expire_days, access_allowed, cr_by, cr_dtimes)
+VALUES
+  ('ROOT',                  3650, true, 90, null, 'System', NOW()),
+  ('BASE',                   730, true, 30, null, 'System', NOW()),
+  ('CERTIFY_SERVICE',        730, true, 90, null, 'System', NOW()),
+  ('CERTIFY_PARTNER',        730, true, 90, null, 'System', NOW()),
+  ('CERTIFY_VC_SIGN_RSA',    730, true, 90, null, 'System', NOW()),
+  ('CERTIFY_VC_SIGN_EC_K1',  730, true, 90, null, 'System', NOW()),
+  ('CERTIFY_VC_SIGN_EC_R1',  730, true, 90, null, 'System', NOW()),
+  ('CERTIFY_VC_SIGN_ED25519', 730, true, 90, null, 'System', NOW())
+ON CONFLICT (app_id) DO NOTHING;
+
+RESET search_path;
+
 -- NOTE: The passwords above are placeholders.
 -- The actual passwords are set via environment variables in the service configs.

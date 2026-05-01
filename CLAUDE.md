@@ -328,8 +328,18 @@ Despite `server.servlet.path=/v1/esignet`, eSignet's `DispatcherServlet` is mapp
 **Fix 7 — Certify actuator is at root context, not under servlet path**
 Spring Boot actuator does not move with the servlet path. Certify's actuator is at `http://inji-certify:8090/actuator/health`, not at `http://inji-certify:8090/v1/certify/actuator/health`. The nginx `/health` location must proxy to the root context path.
 
-**Fix 8 — `key_policy_def` seed rows required in all three schemas**
-`mockidentitysystem`, `esignet`, and `mimoto` all call `KeyManagerConfig.run()` or `AppConfig.run()` on startup, which queries `key_policy_def` for `ROOT` and service-specific entries. If those rows don't exist, the service crashes. All seed `INSERT ... ON CONFLICT DO NOTHING` statements are in `postgres-init.sql`.
+**Fix 8 — `key_policy_def` seed rows required in all schemas (including certify)**
+`mockidentitysystem`, `esignet`, `mimoto`, and `certify` all call `AppConfig.run()` on startup, which queries `key_policy_def` for `ROOT` and service-specific entries. If those rows don't exist, the service crashes. All seed `INSERT ... ON CONFLICT DO NOTHING` statements are in `postgres-init.sql`. For certify specifically, AppConfig.initKeys() checks: `ROOT`, `CERTIFY_SERVICE`, `CERTIFY_SERVICE#TRANSACTION_CACHE` (uses `BASE` policy), `CERTIFY_PARTNER`, `CERTIFY_VC_SIGN_RSA`, `CERTIFY_VC_SIGN_EC_K1`, `CERTIFY_VC_SIGN_EC_R1`, `CERTIFY_VC_SIGN_ED25519`. All 8 are in `postgres-init.sql`.
+
+**Fix 9 — certify `key_store` columns must be TEXT (not varchar(255))**
+certify uses `ddl-auto=update`, so Hibernate creates `key_store` with `varchar(255)` for `certificate_data`, `private_key`, and `master_key`. EC and Ed25519 certificate DER-encoded data exceeds 255 chars — the insert fails with `value too long for type character varying(255)`. `postgres-init.sql` pre-creates `certify.key_store` with `TEXT` for those columns before certify starts.
+_Symptom if wrong_: certify crashes on startup with `DataIntegrityViolationException: value too long for type character varying(255)` at `generateECSignKey`.
+
+**Fix 10 — certify `shedlock` table must exist**
+certify's `StatusListUpdateBatchJob` uses ShedLock for distributed scheduling. ShedLock expects a `shedlock` table but certify's Hibernate doesn't create it automatically. Without it, the scheduled job logs `relation "shedlock" does not exist` every minute. Not fatal, but noisy. `postgres-init.sql` creates it in the `certify` schema.
+
+**Fix 11 — certify `key_alias.uni_ident` must be varchar(512)**
+Same issue as Fix 2 (mimoto/esignet). Certify uses `ddl-auto=update` so Hibernate would create `uni_ident` at 32 chars. `postgres-init.sql` pre-creates the table with `varchar(512)` to prevent truncation failures during key alias storage.
 
 ---
 
@@ -372,7 +382,7 @@ Spring Boot actuator does not move with the servlet path. Certify's actuator is 
 - [x] **Platform-admin tenant wallet setup automated**: April 19, 2026. `ensure_platform_admin_tenant()` added to `init-credebl.sh`. Creates a Credo multi-tenancy tenant for Platform-admin, stores the encrypted `RestTenantAgent` JWT in `org_agents.apiKey`, and sets `tenantId`. Fixes Studio "Create DID" → 500 "Unauthorized" on fresh deployments. See "Platform-admin tenant wallet and DID creation" in Infrastructure design decisions.
 - [x] **Studio OOB JSON-LD credential issuance validated**: April 19, 2026. Required six patches total: (1) utility S3→MinIO, (2) api-gateway TLD validator, (3) Credo CredentialEvents crash guard, (4) issuance schema URL dedup, (5) issuance @context triple-prefix normalization, (6) agent-service shared wallet create-tenant root JWT. All automated in `init-credebl.sh`. Full flow validated: new org → shared wallet → DID → schema → OOB email issuance.
 - [x] **OID4VCI + OID4VP full flow validated**: April 30, 2026. `api-test-oid4vc.sh` passes all 10/10 steps: org → wallet → did:key → no_ledger schema → OID4VCI issuer → credential template (dc+sd-jwt, signerOption DID) → credential offer (preAuthorizedCodeFlow, PIN) → OOB proof request (presentationExchange, 201). `ensure_oid4vc_employment_issuer()` in `init-credebl.sh` provisions all of this on fresh deploy. Key fixes: `CreateCredentialTemplateDto` requires `template: {vct, attributes[]}` (not flat), `signerOption: "DID"` is required, all proof endpoints need `/v1/` prefix. SD-JWT issuance via `credentialType=sdjwt` (PR #1279) was NOT needed — the OID4VCI flow uses the `oid4vc-issuance` service, not the legacy issuance service.
-- [x] **Validate INJI stack on real VPS**: April 23, 2026. All 15 health checks pass (10 services + 5 endpoints). See "INJI services" and "INJI startup fixes" sections for full details. Mock OID4VCI flow available at port 3001 with UIN `5860356276` / OTP `111111`.
+- [x] **Validate INJI stack on real VPS**: April 23, 2026. All 15 health checks pass (10 services + 5 endpoints). Re-validated May 1, 2026 after recovering from keystore/DB sync issues — added Fixes 9-11 (certify key_store TEXT columns, shedlock table, uni_ident varchar(512)). See "INJI services" and "INJI startup fixes" sections for full details. Mock OID4VCI flow available at port 3001 with UIN `5860356276` / OTP `111111`.
 - [ ] **Colombia use case**: Once confirmed, adapt the relevant schema template and update `certify-employment.properties` with the correct credential type and `vct` URL.
 - [ ] **INJI credential configs for education, professional-license, civil-identity**: `certify-employment.properties` exists but the other 3 schema configs for INJI are not yet created. Use `certify-employment.properties` as template.
 
