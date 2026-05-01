@@ -197,13 +197,6 @@ register_esignet_client() {
   local ev_val
   ev_val() { grep "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-; }
 
-  # Ensure search_path for the inji role (needed on re-deploys where postgres-init.sql
-  # already ran without this ALTER ROLE, so it was never applied to the existing role)
-  docker compose exec -T postgres psql -U inji -d mosip_db -q \
-    -c "ALTER ROLE inji SET search_path TO esignet, \"\$user\", public;" \
-    2>/dev/null && ok "inji role search_path = esignet" \
-    || warn "Could not set search_path for inji role"
-
   # Create client_detail table if missing (column names confirmed by decompiling
   # ClientDetail.class from client-management-service-impl-1.5.1.jar)
   docker compose exec -T postgres psql -U inji -d mosip_db -q -c "

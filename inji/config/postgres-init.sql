@@ -1,12 +1,14 @@
 -- CDPI PoC — INJI PostgreSQL initialization
 -- Creates separate schemas for each INJI service within the same DB instance
 
--- Set default search_path for the inji superuser so Hibernate JPA queries
--- that omit the schema prefix (e.g. SELECT ... FROM client_detail) find the
--- right table. Without this, the JDBC ?currentSchema=esignet parameter is
--- set but Hibernate's EntityManager still uses the role's default search_path
--- ("$user", public), causing SQLGrammarException on every eSignet startup.
-ALTER ROLE inji SET search_path TO esignet, "$user", public;
+-- NOTE on eSignet search_path:
+-- eSignet Hibernate JPA queries for client_detail omit the schema prefix.
+-- The fix is in esignet/application.properties via HikariCP connection-init-sql:
+--   spring.datasource.hikari.connection-init-sql=SET search_path TO esignet
+-- This scopes the search_path to eSignet's connection pool only, without
+-- affecting the other services (mock-identity-system, certify, mimoto) that
+-- share the same 'inji' DB user.
+-- DO NOT use ALTER ROLE inji SET search_path here — it breaks all other services.
 
 -- eSignet schema
 CREATE SCHEMA IF NOT EXISTS esignet;
