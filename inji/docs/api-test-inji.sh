@@ -277,10 +277,11 @@ print(json.dumps({
 }))")
 
 OTP_RESP=$(esignet_post "/authorization/send-otp" "$OTP_BODY")
-OTP_STATUS=$(echo "$OTP_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('response',{}).get('status',''))" 2>/dev/null) || OTP_STATUS=""
+OTP_MASKED=$(echo "$OTP_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); r=d.get('response',{}); print(r.get('maskedEmail') or r.get('maskedMobile') or '')" 2>/dev/null) || OTP_MASKED=""
+OTP_ERRORS=$(echo "$OTP_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('errors',[])))" 2>/dev/null) || OTP_ERRORS="1"
 
-if [ "$OTP_STATUS" = "SUCCESS" ] || echo "$OTP_RESP" | grep -q '"status":"SUCCESS"'; then
-  pass "send-otp → OTP sent to UIN $TEST_UIN"
+if [ -n "$OTP_MASKED" ] && [ "$OTP_ERRORS" = "0" ]; then
+  pass "send-otp → OTP sent (masked: $OTP_MASKED)"
 else
   fail "send-otp" "$(echo "$OTP_RESP" | head -c 300)"
 fi

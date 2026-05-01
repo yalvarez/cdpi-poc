@@ -95,6 +95,44 @@ VALUES
   ('MOCK_AUTHENTICATION_SERVICE', 730, true, 90, null, 'System', NOW())
 ON CONFLICT (app_id) DO NOTHING;
 
+-- Application tables for mock-identity-system
+-- (hibernate.hbm2ddl.auto=none — must be created here, Hibernate will NOT create them)
+CREATE TABLE IF NOT EXISTS mock_identity (
+    individual_id  character varying(256) NOT NULL,
+    identity_json  TEXT,
+    CONSTRAINT pk_mock_identity PRIMARY KEY (individual_id)
+);
+
+CREATE TABLE IF NOT EXISTS kyc_auth (
+    kyc_token                   character varying(256)      NOT NULL,
+    partner_specific_user_token character varying(256),
+    response_time               timestamp without time zone,
+    validity                    smallint,
+    transaction_id              character varying(256),
+    individual_id               character varying(256),
+    CONSTRAINT pk_kyc_auth PRIMARY KEY (kyc_token)
+);
+
+CREATE TABLE IF NOT EXISTS verified_claim (
+    id              character varying(36)       NOT NULL,
+    individual_id   character varying(256),
+    claim           character varying(256),
+    trust_framework character varying(256),
+    detail          TEXT,
+    cr_date_time    timestamp without time zone,
+    upd_date_time   timestamp without time zone,
+    is_active       boolean                     DEFAULT true,
+    created_by      character varying(256),
+    CONSTRAINT pk_verified_claim PRIMARY KEY (id)
+);
+
+-- Seed identity for test UIN used in api-test-inji.sh (OTP is always 111111 in mock)
+INSERT INTO mockidentitysystem.mock_identity (individual_id, identity_json)
+VALUES (
+  '5860356276',
+  '{"individualId":"5860356276","fullName":[{"language":"eng","value":"Juan Gomez"}],"givenName":[{"language":"eng","value":"Juan"}],"familyName":[{"language":"eng","value":"Gomez"}],"gender":[{"language":"eng","value":"MLE"}],"dateOfBirth":"1990/01/15","email":"juan.gomez@example.com","phone":"9876543210","preferredLang":"eng","password":"e1wDlA0kTkqBr3SLzirV+g=="}')
+ON CONFLICT (individual_id) DO NOTHING;
+
 RESET search_path;
 
 -- Keymanager tables for esignet

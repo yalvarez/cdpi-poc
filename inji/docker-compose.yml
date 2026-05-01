@@ -107,6 +107,7 @@ services:
     volumes:
       - ./config/mock-identity-system:/config/mockid:ro
       - ./certs:/certs:ro
+      - mock_identity_keystore:/home/mosip/mockid-keystore
     ports:
       - "8082:8082"
     depends_on:
@@ -350,6 +351,8 @@ volumes:
   certify_data:
     driver: local
   mimoto_keystore:
+    driver: local
+  mock_identity_keystore:
     driver: local
 
 # ── Networks ───────────────────────────────────────────────────────────────────
