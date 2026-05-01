@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emisión de Credencial — CDPI PoC</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      background: #f0f4f8;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px;
+      color: #1a202c;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 16px rgba(0,0,0,.08);
+      width: 100%;
+      max-width: 560px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      background: #1A5EA0;
+      padding: 28px 32px;
+    }
+    .card-header .label {
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #a8c8f0;
+      margin-bottom: 6px;
+    }
+    .card-header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .card-body { padding: 32px; }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #718096;
+      margin: 24px 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .section-title:first-child { margin-top: 0; }
+
+    .field { margin-bottom: 16px; }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #4a5568;
+      margin-bottom: 6px;
+    }
+    label .req { color: #e53e3e; margin-left: 2px; }
+
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #1a202c;
+      background: #fff;
+      transition: border-color .15s;
+      appearance: none;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #1A5EA0;
+      box-shadow: 0 0 0 3px rgba(26,94,160,.12);
+    }
+    input::placeholder { color: #a0aec0; }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    .btn {
+      width: 100%;
+      padding: 13px;
+      background: #1A5EA0;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 24px;
+      transition: background .15s, opacity .15s;
+    }
+    .btn:hover:not(:disabled) { background: #164d87; }
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+
+    /* Spinner */
+    .btn .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Alert boxes */
+    .alert {
+      border-radius: 8px;
+      padding: 16px 18px;
+      font-size: 14px;
+      line-height: 1.5;
+      margin-top: 20px;
+      display: none;
+    }
+    .alert.show { display: block; }
+    .alert-success {
+      background: #f0fff4;
+      border: 1px solid #68d391;
+      color: #276749;
+    }
+    .alert-error {
+      background: #fff5f5;
+      border: 1px solid #fc8181;
+      color: #742a2a;
+    }
+    .alert-success .icon { font-size: 20px; margin-right: 8px; }
+
+    .success-detail {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #9ae6b4;
+      font-size: 13px;
+      color: #2f855a;
+    }
+
+    footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #a0aec0;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="label">Infraestructura Digital Pública — CDPI PoC</div>
+      <h1>Emisión de Credencial Verificable</h1>
+    </div>
+
+    <div class="card-body">
+      <form id="form" novalidate>
+
+        <div class="section-title">Notificación</div>
+        <div class="field">
+          <label for="email">Correo electrónico del titular <span class="req">*</span></label>
+          <input type="email" id="email" name="email" placeholder="titular@ejemplo.com" required>
+        </div>
+
+        <div class="section-title">Identidad</div>
+        <div class="row">
+          <div class="field">
+            <label for="given_name">Nombres <span class="req">*</span></label>
+            <input type="text" id="given_name" name="given_name" placeholder="María José" required>
+          </div>
+          <div class="field">
+            <label for="family_name">Apellidos <span class="req">*</span></label>
+            <input type="text" id="family_name" name="family_name" placeholder="García Pérez" required>
+          </div>
+        </div>
+        <div class="field">
+          <label for="document_number">Número de documento</label>
+          <input type="text" id="document_number" name="document_number" placeholder="001-1985031-4">
+        </div>
+
+        <div class="section-title">Relación laboral</div>
+        <div class="field">
+          <label for="employer_name">Empleador</label>
+          <input type="text" id="employer_name" name="employer_name" placeholder="Ministerio de Educación">
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="position_title">Cargo</label>
+            <input type="text" id="position_title" name="position_title" placeholder="Técnico en Sistemas">
+          </div>
+          <div class="field">
+            <label for="employment_status">Estado</label>
+            <select id="employment_status" name="employment_status">
+              <option value="active">Activo</option>
+              <option value="terminated">Terminado</option>
+              <option value="suspended">Suspendido</option>
+              <option value="on_leave">En licencia</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="employment_start_date">Fecha de inicio</label>
+          <input type="date" id="employment_start_date" name="employment_start_date">
+        </div>
+
+        <button type="submit" class="btn" id="submit-btn">
+          Emitir credencial y enviar correo
+        </button>
+      </form>
+
+      <div class="alert alert-success" id="alert-success">
+        <span class="icon">✓</span> <strong>¡Credencial emitida!</strong>
+        <div class="success-detail" id="success-detail"></div>
+      </div>
+
+      <div class="alert alert-error" id="alert-error" id="alert-error"></div>
+    </div>
+  </div>
+
+  <footer>CDPI PoC — Credenciales Verificables (SD-JWT VC · OID4VCI)</footer>
+
+  <script>
+    const form       = document.getElementById('form');
+    const btn        = document.getElementById('submit-btn');
+    const alertOk    = document.getElementById('alert-success');
+    const alertErr   = document.getElementById('alert-error');
+    const detailEl   = document.getElementById('success-detail');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      alertOk.classList.remove('show');
+      alertErr.classList.remove('show');
+
+      // Basic validation
+      const email      = form.email.value.trim();
+      const given_name = form.given_name.value.trim();
+      const family_name= form.family_name.value.trim();
+      if (!email || !given_name || !family_name) {
+        showError('Por favor complete los campos obligatorios: correo, nombres y apellidos.');
+        return;
+      }
+
+      const payload = {
+        email,
+        given_name,
+        family_name,
+        document_number:       form.document_number.value.trim(),
+        employer_name:         form.employer_name.value.trim(),
+        position_title:        form.position_title.value.trim(),
+        employment_status:     form.employment_status.value,
+        employment_start_date: form.employment_start_date.value,
+      };
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Emitiendo...';
+
+      try {
+        const res  = await fetch('/api/issue', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          showError(data.error || `Error ${res.status}`);
+        } else {
+          alertOk.classList.add('show');
+          detailEl.textContent =
+            `Se envió un correo a ${email} con el código QR, el PIN y las instrucciones para descargar la credencial.`;
+          form.reset();
+        }
+      } catch (err) {
+        showError('Error de red. Verifique que el portal esté corriendo y que CREDEBL esté disponible.');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Emitir credencial y enviar correo';
+      }
+    });
+
+    function showError(msg) {
+      alertErr.textContent = '✗ ' + msg;
+      alertErr.classList.add('show');
+    }
+  </script>
+</body>
+</html>

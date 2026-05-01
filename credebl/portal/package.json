@@ -1,0 +1,17 @@
+{
+  "name": "cdpi-credential-portal",
+  "version": "1.0.0",
+  "description": "CDPI PoC — credential issuance portal (email + QR + PIN)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "nodemailer": "^6.9.7",
+    "qrcode": "^1.5.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
