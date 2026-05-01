@@ -14,6 +14,7 @@ inji/certs/*.crt
 credebl/config/agent-config/
 credebl/config/agent-token/
 credebl/.agent-runtime/
+credebl/portal/node_modules/
 
 # OS
 .DS_Store
