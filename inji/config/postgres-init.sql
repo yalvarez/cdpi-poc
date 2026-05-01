@@ -1,6 +1,13 @@
 -- CDPI PoC — INJI PostgreSQL initialization
 -- Creates separate schemas for each INJI service within the same DB instance
 
+-- Set default search_path for the inji superuser so Hibernate JPA queries
+-- that omit the schema prefix (e.g. SELECT ... FROM client_detail) find the
+-- right table. Without this, the JDBC ?currentSchema=esignet parameter is
+-- set but Hibernate's EntityManager still uses the role's default search_path
+-- ("$user", public), causing SQLGrammarException on every eSignet startup.
+ALTER ROLE inji SET search_path TO esignet, "$user", public;
+
 -- eSignet schema
 CREATE SCHEMA IF NOT EXISTS esignet;
 CREATE USER esignet_user WITH PASSWORD 'CHANGE_ME_ESIGNET';
@@ -149,6 +156,57 @@ VALUES
   ('OIDC_SERVICE',  730, true, 90, null, 'System', NOW()),
   ('OIDC_PARTNER',  730, true, 90, null, 'System', NOW())
 ON CONFLICT (app_id) DO NOTHING;
+
+-- OIDC client registry (ClientManagementServiceImpl reads this table)
+-- Column names confirmed by decompiling ClientDetail.class from client-management-service-impl-1.5.1.jar:
+--   auth_methods (NOT client_auth_methods), cr_dtimes (NOT createdtimes), upd_dtimes (NOT updatedtimes)
+-- public_key is jsonb in the entity annotation but text works identically for read/write in psql.
+-- The inji-certify-client row is seeded here using the JWK from oidckeystore.p12 (CN=inji-certify-poc).
+-- init-inji.sh re-runs this upsert after eSignet starts so the JWK stays current on re-deploys.
+CREATE TABLE IF NOT EXISTS client_detail (
+    id            character varying(256)      NOT NULL,
+    name          character varying(256)      NOT NULL,
+    rp_id         character varying(256),
+    logo_uri      character varying(2048),
+    redirect_uris character varying(8192)     NOT NULL,
+    public_key    TEXT                        NOT NULL,
+    claims        character varying(4096),
+    acr_values    character varying(1024),
+    status        character varying(64)       NOT NULL,
+    grant_types   character varying(1024)     NOT NULL,
+    auth_methods  character varying(1024),
+    cr_dtimes     timestamp without time zone,
+    upd_dtimes    timestamp without time zone,
+    CONSTRAINT pk_esignet_client_detail PRIMARY KEY (id)
+);
+
+-- inji-certify-client: OIDC client registered in eSignet for Certify OID4VCI flow.
+-- The JWK public_key must match the keypair in oidckeystore.p12 (alias oidckeystore).
+-- init-inji.sh extracts the live JWK at deploy time and upserts this row so it stays
+-- in sync when the keystore is regenerated (e.g. after a full redeploy).
+-- redirect_uris must include both the web URL (http://<VPS_IP>:3001/home) and the
+-- mobile deep-link (io.mosip.residentapp://mosip/home) used by Inji mobile wallet.
+INSERT INTO esignet.client_detail
+  (id, name, rp_id, logo_uri, redirect_uris, public_key, claims, acr_values,
+   status, grant_types, auth_methods, cr_dtimes, upd_dtimes)
+VALUES (
+  'inji-certify-client',
+  'Inji Certify Client',
+  'inji-certify-client',
+  'LOGO_URI_PLACEHOLDER',
+  '["REDIRECT_URI_WEB_PLACEHOLDER","io.mosip.residentapp://mosip/home"]',
+  'JWK_PLACEHOLDER',
+  '["name","email","birthdate","gender","phone_number"]',
+  '["mosip:idp:acr:generated-code","mosip:idp:acr:linked-wallet"]',
+  'ACTIVE',
+  '["authorization_code"]',
+  '["private_key_jwt"]',
+  NOW(), NOW()
+) ON CONFLICT (id) DO UPDATE SET
+  public_key   = EXCLUDED.public_key,
+  logo_uri     = EXCLUDED.logo_uri,
+  redirect_uris = EXCLUDED.redirect_uris,
+  upd_dtimes   = NOW();
 
 RESET search_path;
 

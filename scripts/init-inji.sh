@@ -185,6 +185,108 @@ patch_certify_schema() {
     || warn "Could not check/fix certify key_alias.uni_ident"
 }
 
+# Register inji-certify-client in eSignet's client_detail table.
+# Idempotent: safe to call on fresh and existing deployments.
+# Runs after eSignet is healthy so the search_path change is immediately active.
+# Also ensures the client_detail table exists (postgres-init.sql may not re-run
+# on existing volumes).
+register_esignet_client() {
+  info "Registering inji-certify-client in eSignet client_detail..."
+
+  cd "$INJI_DIR"
+  local ev_val
+  ev_val() { grep "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-; }
+
+  # Ensure search_path for the inji role (needed on re-deploys where postgres-init.sql
+  # already ran without this ALTER ROLE, so it was never applied to the existing role)
+  docker compose exec -T postgres psql -U inji -d mosip_db -q \
+    -c "ALTER ROLE inji SET search_path TO esignet, \"\$user\", public;" \
+    2>/dev/null && ok "inji role search_path = esignet" \
+    || warn "Could not set search_path for inji role"
+
+  # Create client_detail table if missing (column names confirmed by decompiling
+  # ClientDetail.class from client-management-service-impl-1.5.1.jar)
+  docker compose exec -T postgres psql -U inji -d mosip_db -q -c "
+    SET search_path TO esignet;
+    CREATE TABLE IF NOT EXISTS client_detail (
+      id            character varying(256)      NOT NULL,
+      name          character varying(256)      NOT NULL,
+      rp_id         character varying(256),
+      logo_uri      character varying(2048),
+      redirect_uris character varying(8192)     NOT NULL,
+      public_key    TEXT                        NOT NULL,
+      claims        character varying(4096),
+      acr_values    character varying(1024),
+      status        character varying(64)       NOT NULL,
+      grant_types   character varying(1024)     NOT NULL,
+      auth_methods  character varying(1024),
+      cr_dtimes     timestamp without time zone,
+      upd_dtimes    timestamp without time zone,
+      CONSTRAINT pk_esignet_client_detail PRIMARY KEY (id)
+    );
+  " 2>/dev/null && ok "esignet.client_detail table present" \
+    || warn "Could not ensure client_detail table"
+
+  # Extract JWK public key from oidckeystore.p12 and upsert the client row
+  local KEYSTORE="$INJI_DIR/certs/oidckeystore.p12"
+  local KS_PASS; KS_PASS="$(ev_val CERTIFY_KEYSTORE_PASSWORD)"
+  local VPS_IP;  VPS_IP="$(ev_val PUBLIC_URL | sed 's|http://||')"
+
+  if [ ! -f "$KEYSTORE" ] || [ -z "$KS_PASS" ]; then
+    warn "Keystore or password not available — skipping JWK upsert"
+    return 0
+  fi
+
+  local JWK
+  JWK=$(python3 - "$KEYSTORE" "$KS_PASS" <<'PYEOF'
+import subprocess, base64, json, sys
+ks, pw = sys.argv[1], sys.argv[2]
+cert_pem = subprocess.run(['openssl','pkcs12','-in',ks,'-nokeys','-passin','pass:'+pw],
+    capture_output=True).stdout
+pub_pem = subprocess.run(['openssl','x509','-pubkey','-noout'],
+    input=cert_pem, capture_output=True).stdout
+mod_hex = subprocess.run(['openssl','rsa','-pubin','-modulus','-noout'],
+    input=pub_pem, capture_output=True).stdout.decode().strip().replace('Modulus=','')
+n = bytes.fromhex(mod_hex)
+if n[0] >= 0x80: n = b'\x00' + n
+n64 = base64.urlsafe_b64encode(n).rstrip(b'=').decode()
+e64 = base64.urlsafe_b64encode(b'\x01\x00\x01').rstrip(b'=').decode()
+print(json.dumps({"kty":"RSA","n":n64,"e":e64,"alg":"RS256","use":"sig"}))
+PYEOF
+)
+
+  if [ -z "$JWK" ]; then
+    warn "JWK extraction failed — skipping client_detail upsert"
+    return 0
+  fi
+
+  local JWK_ESC="${JWK//\'/\'\'}"
+  local LOGO_URI="http://${VPS_IP}:3001/logo.png"
+  local REDIRECT_WEB="http://${VPS_IP}:3001/home"
+
+  docker compose exec -T postgres psql -U inji -d mosip_db -q -c "
+    SET search_path TO esignet;
+    INSERT INTO client_detail
+      (id, name, rp_id, logo_uri, redirect_uris, public_key, claims, acr_values,
+       status, grant_types, auth_methods, cr_dtimes, upd_dtimes)
+    VALUES (
+      'inji-certify-client', 'Inji Certify Client', 'inji-certify-client',
+      '${LOGO_URI}',
+      '[\"${REDIRECT_WEB}\",\"io.mosip.residentapp://mosip/home\"]',
+      '${JWK_ESC}',
+      '[\"name\",\"email\",\"birthdate\",\"gender\",\"phone_number\"]',
+      '[\"mosip:idp:acr:generated-code\",\"mosip:idp:acr:linked-wallet\"]',
+      'ACTIVE', '[\"authorization_code\"]', '[\"private_key_jwt\"]',
+      NOW(), NOW()
+    ) ON CONFLICT (id) DO UPDATE SET
+      public_key    = EXCLUDED.public_key,
+      logo_uri      = EXCLUDED.logo_uri,
+      redirect_uris = EXCLUDED.redirect_uris,
+      upd_dtimes    = NOW();
+  " 2>/dev/null && ok "inji-certify-client registered in esignet.client_detail" \
+    || warn "Could not register inji-certify-client"
+}
+
 # Wait for a service to be in running/Up state (no healthcheck defined)
 wait_running() {
   local svc="$1" max_wait="${2:-60}" elapsed=0
@@ -276,6 +378,7 @@ if [ -f "$ENV_FILE" ]; then
     patch_certify_schema
     wait_healthy mock-identity-system 180
     wait_healthy esignet              180
+    register_esignet_client
     wait_healthy inji-certify         240
     wait_running certify-nginx         60
     wait_running mimoto-config-server  30
@@ -502,6 +605,7 @@ wait_healthy redis                 60
 patch_certify_schema
 wait_healthy mock-identity-system 180
 wait_healthy esignet              180
+register_esignet_client
 wait_healthy inji-certify         240
 wait_running certify-nginx         60
 wait_running mimoto-config-server  30
