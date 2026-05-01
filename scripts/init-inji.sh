@@ -110,6 +110,81 @@ wait_healthy() {
   return 1
 }
 
+# Apply certify schema patches that cannot be handled by postgres-init.sql on re-runs.
+# postgres-init.sql runs only when the volume is first created (empty). On re-deployments
+# the volume already exists, so new seed data is never applied automatically.
+# This function is idempotent: safe to call on both fresh and existing deployments.
+patch_certify_schema() {
+  info "Checking certify schema (key_policy_def, key_store columns, shedlock)..."
+
+  cd "$INJI_DIR"
+
+  # 1. Add missing key_policy_def rows
+  docker compose exec -T postgres psql -U inji -d mosip_db -q -c "
+    INSERT INTO certify.key_policy_def
+      (app_id, key_validity_duration, is_active, pre_expire_days, access_allowed, cr_by, cr_dtimes)
+    VALUES
+      ('ROOT',                   3650, true, 90, null, 'System', NOW()),
+      ('BASE',                    730, true, 30, null, 'System', NOW()),
+      ('CERTIFY_SERVICE',         730, true, 90, null, 'System', NOW()),
+      ('CERTIFY_PARTNER',         730, true, 90, null, 'System', NOW()),
+      ('CERTIFY_VC_SIGN_RSA',     730, true, 90, null, 'System', NOW()),
+      ('CERTIFY_VC_SIGN_EC_K1',   730, true, 90, null, 'System', NOW()),
+      ('CERTIFY_VC_SIGN_EC_R1',   730, true, 90, null, 'System', NOW()),
+      ('CERTIFY_VC_SIGN_ED25519',  730, true, 90, null, 'System', NOW())
+    ON CONFLICT (app_id) DO NOTHING;
+  " 2>/dev/null && ok "certify key_policy_def rows present" \
+    || warn "Could not ensure certify key_policy_def rows"
+
+  # 2. Widen key_store columns to TEXT if they are still varchar(255)
+  docker compose exec -T postgres psql -U inji -d mosip_db -q -c "
+    DO \$\$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema='certify' AND table_name='key_store'
+          AND column_name='certificate_data' AND character_maximum_length=255
+      ) THEN
+        ALTER TABLE certify.key_store
+          ALTER COLUMN certificate_data TYPE TEXT,
+          ALTER COLUMN private_key      TYPE TEXT;
+        RAISE NOTICE 'certify.key_store columns widened to TEXT';
+      END IF;
+    END
+    \$\$;
+  " 2>/dev/null && ok "certify key_store columns OK (TEXT)" \
+    || warn "Could not check/fix certify key_store column sizes"
+
+  # 3. Create shedlock table if missing
+  docker compose exec -T postgres psql -U inji -d mosip_db -q -c "
+    CREATE TABLE IF NOT EXISTS certify.shedlock (
+      name       CHARACTER VARYING(64)       NOT NULL,
+      lock_until TIMESTAMP WITHOUT TIME ZONE,
+      locked_at  TIMESTAMP WITHOUT TIME ZONE,
+      locked_by  CHARACTER VARYING(255),
+      PRIMARY KEY (name)
+    );
+  " 2>/dev/null && ok "certify shedlock table present" \
+    || warn "Could not ensure certify shedlock table"
+
+  # 4. Widen key_alias.uni_ident if Hibernate created it at 32 chars
+  docker compose exec -T postgres psql -U inji -d mosip_db -q -c "
+    DO \$\$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema='certify' AND table_name='key_alias'
+          AND column_name='uni_ident' AND character_maximum_length < 512
+      ) THEN
+        ALTER TABLE certify.key_alias ALTER COLUMN uni_ident TYPE character varying(512);
+        RAISE NOTICE 'certify.key_alias.uni_ident widened to varchar(512)';
+      END IF;
+    END
+    \$\$;
+  " 2>/dev/null && ok "certify key_alias.uni_ident size OK" \
+    || warn "Could not check/fix certify key_alias.uni_ident"
+}
+
 # Wait for a service to be in running/Up state (no healthcheck defined)
 wait_running() {
   local svc="$1" max_wait="${2:-60}" elapsed=0
@@ -198,9 +273,10 @@ if [ -f "$ENV_FILE" ]; then
     #                → mimoto → inji-web+mailpit
     wait_healthy postgres              60
     wait_healthy redis                 60
+    patch_certify_schema
     wait_healthy mock-identity-system 180
-    wait_healthy esignet              150
-    wait_healthy inji-certify         180
+    wait_healthy esignet              180
+    wait_healthy inji-certify         240
     wait_running certify-nginx         60
     wait_running mimoto-config-server  30
     wait_healthy mimoto               120
@@ -415,9 +491,13 @@ echo ""
 
 wait_healthy postgres              60
 wait_healthy redis                 60
+# Patch certify schema before certify starts — safe no-op on fresh volumes
+# (postgres-init.sql already applied the tables), but required on existing volumes
+# where postgres-init.sql was run before the certify fixes were added.
+patch_certify_schema
 wait_healthy mock-identity-system 180
-wait_healthy esignet              150
-wait_healthy inji-certify         180
+wait_healthy esignet              180
+wait_healthy inji-certify         240
 wait_running certify-nginx         60
 wait_running mimoto-config-server  30
 wait_healthy mimoto               120
