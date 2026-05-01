@@ -417,14 +417,19 @@ echo ""
 
 echo "── Keystore (OIDC signing key) ──────────────────────────────"
 KEYSTORE="$INJI_DIR/certs/oidckeystore.p12"
+# Always delete and regenerate on a fresh init — the .env was just written
+# with a NEW CERTIFY_KEYSTORE_PASSWORD. Any existing keystore was created
+# with a different password and will be rejected by all MOSIP services.
+# (The ./certs dir is a bind mount, not a Docker volume, so it survives
+#  docker compose down -v and must be cleaned up explicitly.)
 if [ -f "$KEYSTORE" ]; then
-  ok "Keystore already exists: $KEYSTORE"
-else
-  info "Generating OIDC keystore (PKCS12)..."
-  CERTIFY_KEYSTORE_PASSWORD="${CERTIFY_KEYSTORE_PASSWORD}" \
-    bash "$SCRIPT_DIR/generate-inji-certs.sh"
-  ok "Keystore generated: $KEYSTORE"
+  info "Removing stale keystore (password changed with new .env)..."
+  rm -f "$KEYSTORE"
 fi
+info "Generating OIDC keystore (PKCS12)..."
+CERTIFY_KEYSTORE_PASSWORD="${CERTIFY_KEYSTORE_PASSWORD}" \
+  bash "$SCRIPT_DIR/generate-inji-certs.sh"
+ok "Keystore generated: $KEYSTORE"
 
 # =============================================================================
 # IMAGE PULL
