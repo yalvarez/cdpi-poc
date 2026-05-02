@@ -185,6 +185,7 @@ services:
       - db.dbuser.password=${POSTGRES_PASSWORD}
       - mosip.certify.authorization.url=http://esignet:8088
       - mosip.certify.domain.url=${PUBLIC_URL:-http://localhost}:8090
+      - mosip.certify.authn.issuer-uri=${PUBLIC_URL:-http://localhost}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
