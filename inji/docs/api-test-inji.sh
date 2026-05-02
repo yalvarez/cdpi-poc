@@ -231,7 +231,7 @@ print(json.dumps({
     'clientId': '${CLIENT_ID}',
     'redirectUri': '${REDIRECT_URI}',
     'responseType': 'code',
-    'scope': 'openid profile',
+    'scope': 'EmploymentCertification openid',
     'acrValues': 'mosip:idp:acr:generated-code',
     'display': 'page',
     'prompt': 'login',
@@ -326,8 +326,8 @@ print(json.dumps({
   'requestTime': '$(req_time)',
   'request': {
     'transactionId': '${TRANSACTION_ID}',
-    'acceptedClaims': ['name', 'email'],
-    'permittedAuthorizeScopes': ['openid', 'profile']
+    'acceptedClaims': ['given_name', 'family_name'],
+    'permittedAuthorizeScopes': ['EmploymentCertification']
   }
 }))")
 
