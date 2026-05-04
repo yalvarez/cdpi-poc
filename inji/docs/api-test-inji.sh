@@ -231,7 +231,7 @@ print(json.dumps({
     'clientId': '${CLIENT_ID}',
     'redirectUri': '${REDIRECT_URI}',
     'responseType': 'code',
-    'scope': 'EmploymentCertification openid',
+    'scope': 'openid profile',
     'acrValues': 'mosip:idp:acr:generated-code',
     'display': 'page',
     'prompt': 'login',
@@ -326,8 +326,8 @@ print(json.dumps({
   'requestTime': '$(req_time)',
   'request': {
     'transactionId': '${TRANSACTION_ID}',
-    'acceptedClaims': ['given_name', 'family_name'],
-    'permittedAuthorizeScopes': ['EmploymentCertification']
+    'acceptedClaims': ['name', 'email'],
+    'permittedAuthorizeScopes': ['openid', 'profile']
   }
 }))")
 
@@ -442,6 +442,16 @@ if [ -n "$ACCESS_TOKEN" ]; then
   TOKEN_TYPE=$(echo "$TOKEN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token_type','Bearer'))" 2>/dev/null)
   pass "Token exchange → access_token obtained (type: $TOKEN_TYPE)"
   echo "    access_token: ${ACCESS_TOKEN:0:40}..."
+  # Decode JWT payload for debugging
+  TOKEN_CLAIMS=$(echo "$ACCESS_TOKEN" | cut -d. -f2 | python3 -c "
+import sys,base64,json
+p=sys.stdin.read().strip()
+p+='='*((4-len(p)%4)%4)
+d=json.loads(base64.urlsafe_b64decode(p).decode())
+print('    iss: '+str(d.get('iss','?')))
+print('    aud: '+str(d.get('aud','?')))
+print('    scope: '+str(d.get('scope','?')))
+" 2>/dev/null) && echo "$TOKEN_CLAIMS" || true
 else
   fail "Token exchange" "$(echo "$TOKEN_RESP" | head -c 300)"
   SKIP_PHASE3=true
