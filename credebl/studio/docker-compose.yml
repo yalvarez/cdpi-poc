@@ -1,0 +1,100 @@
+# =============================================================================
+# CDPI PoC — CREDEBL Studio (standalone)
+# -----------------------------------------------------------------------------
+# Runs the Studio frontend independently from the CREDEBL core stack.
+# Requires the core stack (init-credebl.sh) to already be running.
+#
+# Config: reads ../env (the core's .env) — no separate .env needed.
+# Network: joins cdpi-credebl_credebl-net (created by the core compose).
+#
+# Usage:
+#   bash scripts/init-credebl-studio.sh
+#   — or manually —
+#   cd credebl/studio
+#   docker compose build
+#   docker compose up -d --no-build
+# =============================================================================
+
+name: cdpi-credebl-studio
+
+services:
+
+  studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_MODE: ${NEXT_PUBLIC_MODE:-DEV}
+        NEXT_PUBLIC_BASE_URL: ${API_GATEWAY_PROTOCOL:-http}://${API_ENDPOINT}/v1
+        NEXT_PUBLIC_ECOSYSTEM_FRONT_END_URL: ${STUDIO_URL:-http://YOUR_VPS_IP:3000}
+        CRYPTO_PRIVATE_KEY: ${CRYPTO_PRIVATE_KEY}
+        NEXT_PUBLIC_PLATFORM_NAME: ${PLATFORM_NAME:-CREDEBL}
+        NEXTAUTH_URL: ${STUDIO_URL:-http://YOUR_VPS_IP:3000}
+        NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+        NEXTAUTH_COOKIE_DOMAIN: ${NEXTAUTH_COOKIE_DOMAIN:-}
+        NEXTAUTH_PROTOCOL: ${APP_PROTOCOL:-http}
+        PUBLIC_ALLOW_DOMAIN: ${PUBLIC_ALLOW_DOMAIN:-http://YOUR_VPS_IP:5000 http://localhost:5000 http://localhost:3000 ws://YOUR_VPS_IP:5000 ws://localhost:5000}
+        NEXT_PUBLIC_ENABLE_APP_LAUNCHER: ${NEXT_PUBLIC_ENABLE_APP_LAUNCHER:-false}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-CREDEBL}
+        NEXT_PUBLIC_ENABLE_SOCIAL_LOGIN: ${NEXT_PUBLIC_ENABLE_SOCIAL_LOGIN:-false}
+        NEXT_PUBLIC_ENABLE_BILLING_OPTION: ${NEXT_PUBLIC_ENABLE_BILLING_OPTION:-false}
+        NEXT_PUBLIC_ACTIVE_THEME: ${NEXT_PUBLIC_ACTIVE_THEME:-credebl}
+        NEXT_PUBLIC_APP_TITLE: ${NEXT_PUBLIC_APP_TITLE:-CREDEBL Studio}
+        NEXT_PUBLIC_FOOTER_TEXT: ${NEXT_PUBLIC_FOOTER_TEXT:-CDPI PoC}
+        NEXT_PUBLIC_LOGO_BASE_URL: ${NEXT_PUBLIC_LOGO_BASE_URL:-}
+        NEXT_PUBLIC_ADMIN_PORTAL_CLIENT_ID: ${NEXT_PUBLIC_ADMIN_PORTAL_CLIENT_ID:-adminClient}
+        NEXT_PUBLIC_LANDINGPAGE_URL: ${NEXT_PUBLIC_LANDINGPAGE_URL:-}
+        NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL: ${NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL:-${SCHEMA_FILE_SERVER_URL:-http://schema-file-server:4000/schemas/}}
+        OPENSSL_HEADER: ${OPENSSL_HEADER:-53616c7465645f5f}
+        PUBLIC_ECOSYSTEM_BASE_URL: ${PUBLIC_ECOSYSTEM_BASE_URL:-}
+        MODE: ${MODE:-DEV}
+        NEXT_PUBLIC_CURRENT_RELEASE: ${NEXT_PUBLIC_CURRENT_RELEASE:-CDPI-PoC}
+    container_name: credebl-studio
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_MODE: ${NEXT_PUBLIC_MODE:-DEV}
+      NEXT_PUBLIC_BASE_URL: ${API_GATEWAY_PROTOCOL:-http}://${API_ENDPOINT}/v1
+      NEXT_PUBLIC_ECOSYSTEM_FRONT_END_URL: ${STUDIO_URL:-http://YOUR_VPS_IP:3000}
+      CRYPTO_PRIVATE_KEY: ${CRYPTO_PRIVATE_KEY}
+      NEXT_PUBLIC_PLATFORM_NAME: ${PLATFORM_NAME:-CREDEBL}
+      NEXTAUTH_URL: ${STUDIO_URL:-http://YOUR_VPS_IP:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXTAUTH_COOKIE_DOMAIN: ${NEXTAUTH_COOKIE_DOMAIN:-}
+      NEXTAUTH_PROTOCOL: ${APP_PROTOCOL:-http}
+      PUBLIC_ALLOW_DOMAIN: ${PUBLIC_ALLOW_DOMAIN:-http://YOUR_VPS_IP:5000 http://localhost:5000 http://localhost:3000 ws://YOUR_VPS_IP:5000 ws://localhost:5000}
+      NEXT_PUBLIC_ENABLE_APP_LAUNCHER: ${NEXT_PUBLIC_ENABLE_APP_LAUNCHER:-false}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-CREDEBL}
+      NEXT_PUBLIC_ENABLE_SOCIAL_LOGIN: ${NEXT_PUBLIC_ENABLE_SOCIAL_LOGIN:-false}
+      NEXT_PUBLIC_ENABLE_BILLING_OPTION: ${NEXT_PUBLIC_ENABLE_BILLING_OPTION:-false}
+      NEXT_PUBLIC_ACTIVE_THEME: ${NEXT_PUBLIC_ACTIVE_THEME:-credebl}
+      NEXT_PUBLIC_APP_TITLE: ${NEXT_PUBLIC_APP_TITLE:-CREDEBL Studio}
+      NEXT_PUBLIC_FOOTER_TEXT: ${NEXT_PUBLIC_FOOTER_TEXT:-CDPI PoC}
+      NEXT_PUBLIC_LOGO_BASE_URL: ${NEXT_PUBLIC_LOGO_BASE_URL:-}
+      NEXT_PUBLIC_ADMIN_PORTAL_CLIENT_ID: ${NEXT_PUBLIC_ADMIN_PORTAL_CLIENT_ID:-adminClient}
+      NEXT_PUBLIC_LANDINGPAGE_URL: ${NEXT_PUBLIC_LANDINGPAGE_URL:-}
+      NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL: ${NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL:-${SCHEMA_FILE_SERVER_URL:-http://schema-file-server:4000/schemas/}}
+      OPENSSL_HEADER: ${OPENSSL_HEADER:-53616c7465645f5f}
+      PUBLIC_ECOSYSTEM_BASE_URL: ${PUBLIC_ECOSYSTEM_BASE_URL:-}
+      MODE: ${MODE:-DEV}
+      NEXT_PUBLIC_CURRENT_RELEASE: ${NEXT_PUBLIC_CURRENT_RELEASE:-CDPI-PoC}
+    ports:
+      - "3000:3000"
+    networks:
+      - credebl-net
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+# ---------------------------------------------------------------------------
+# Network — joins the core stack's network so Studio can reach internal
+# services (schema-file-server, etc.) via Docker DNS.
+# The name follows Docker Compose's convention: <project>_<network>.
+# The core project is named "cdpi-credebl" (see credebl/docker-compose.yml).
+# ---------------------------------------------------------------------------
+networks:
+  credebl-net:
+    external: true
+    name: cdpi-credebl_credebl-net

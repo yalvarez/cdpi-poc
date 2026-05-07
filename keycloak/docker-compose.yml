@@ -1,0 +1,87 @@
+# =============================================================================
+# CDPI PoC — Keycloak Standalone (HTTP, no SSL)
+# -----------------------------------------------------------------------------
+# Base compose file — HTTP puro en puerto 8080.
+# Para SSL usa: docker compose -f docker-compose.yml -f docker-compose.ssl.yml
+#
+# Uso:
+#   bash init-keycloak.sh       ← punto de entrada recomendado
+#   docker compose up -d        ← arranque directo (requiere .env)
+# =============================================================================
+
+name: cdpi-keycloak
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:14-alpine
+    container_name: keycloak-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-keycloak}
+      POSTGRES_USER: ${POSTGRES_USER:-keycloak}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-keycloak}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - keycloak-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── Keycloak (HTTP mode) ────────────────────────────────────────────────────
+  # start-dev: HTTP habilitado, sin restricciones de hostname.
+  # Configurar KC_HOSTNAME en .env para que los tokens reflejen la URL pública.
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0.6
+    container_name: keycloak
+    restart: unless-stopped
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-keycloak}
+      KC_DB_USERNAME: ${POSTGRES_USER:-keycloak}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME_URL: ${KC_PUBLIC_URL:-}
+      KC_HTTP_PORT: 8080
+      KC_HEALTH_ENABLED: "true"
+      KC_LOG_LEVEL: INFO
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    networks:
+      - keycloak-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+# ── Volumes ────────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+
+# ── Networks ───────────────────────────────────────────────────────────────────
+networks:
+  keycloak-net:
+    driver: bridge

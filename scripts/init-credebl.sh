@@ -621,37 +621,6 @@ ensure_email_from_address() {
   echo "  User and issuance services restarted."
 }
 
-ensure_brand_logo() {
-  # Upload CREDEBL logo to MinIO orgLogos/ and set BRAND_LOGO in .env.
-  # The issuance email template uses BRAND_LOGO for the header image.
-  # Without it the email shows a broken <img src="undefined"> tag.
-  if grep -q '^BRAND_LOGO=' "$ENV_FILE" 2>/dev/null; then
-    echo "  BRAND_LOGO already configured — skipping logo upload."
-    return 0
-  fi
-  echo "  Uploading CREDEBL logo to MinIO..."
-  # Copy logo from Studio image (always present) to MinIO orgLogos/
-  docker cp credebl-studio:/app/public/images/CREDEBL_LOGO.png /tmp/credebl-logo-upload.png 2>/dev/null
-  if [ ! -f /tmp/credebl-logo-upload.png ]; then
-    echo "  WARNING: Could not find logo in Studio container — skipping."
-    return 0
-  fi
-  docker cp /tmp/credebl-logo-upload.png credebl-minio:/tmp/credebl-logo-upload.png 2>/dev/null
-  docker exec credebl-minio mc alias set cdpi http://localhost:9000 \
-    "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" --quiet 2>/dev/null
-  docker exec credebl-minio mc cp /tmp/credebl-logo-upload.png \
-    cdpi/credebl-bucket/orgLogos/credebl-logo.png 2>/dev/null
-  rm -f /tmp/credebl-logo-upload.png
-  LOGO_URL="http://${VPS_HOST}:9000/credebl-bucket/orgLogos/credebl-logo.png"
-  printf '\n# Email branding — set by init-credebl.sh\nBRAND_LOGO=%s\nIOS_DOWNLOAD_LINK=https://apps.apple.com/in/app/inji-wallet/id1631979601\n' "$LOGO_URL" >> "$ENV_FILE"
-  echo "  Logo available at: $LOGO_URL"
-  echo "  BRAND_LOGO and IOS_DOWNLOAD_LINK added to .env — restarting issuance..."
-  # Use docker restart (not compose up --force-recreate) to avoid cascading other containers
-  # and losing in-container patches that were applied earlier.
-  docker restart credebl-issuance >/dev/null 2>&1 &
-  sleep 5
-}
-
 apply_container_patches() {
   echo
   echo "Applying CREDEBL container patches..."
@@ -1309,15 +1278,6 @@ ssl_restart_services() {
   docker compose restart api-gateway user organization issuance verification ledger connection cloud-wallet >/dev/null
 }
 
-ssl_rebuild_studio() {
-  local vps_domain="${1:-}"
-  [ -z "$vps_domain" ] && return 0
-  echo "  Rebuilding Studio with HTTPS env vars (5-8 min)..."
-  docker compose build studio
-  docker compose up -d --no-build studio >/dev/null
-  echo "  Studio rebuilt."
-}
-
 ssl_nginx_certbot() {
   # Installs nginx + certbot, writes proxy configs, issues Let's Encrypt certs.
   # This block needs root — the real work happens inside a temp bash script
@@ -1628,15 +1588,7 @@ run_ssl_setup() {
   # This wipes container-filesystem patches (issuance, api-gateway, etc.).
   ssl_restart_services
 
-  # Step 5 — rebuild Studio with the baked-in HTTPS env vars.
-  # IMPORTANT: do this BEFORE re-applying patches. docker compose up -d studio reads
-  # the updated .env and may recreate api-gateway / issuance to pick up changed env
-  # vars (API_GATEWAY_PROTOCOL, KEYCLOAK_DOMAIN, etc.). Any patches applied before
-  # the studio rebuild would be lost when those containers are recreated from image.
-  ssl_rebuild_studio "$vps_domain"
-
-  # Step 6 — re-apply all container patches AFTER the Studio rebuild, so any
-  # container recreations triggered by docker compose up -d studio are already done.
+  # Step 5 — re-apply all container patches after service restarts.
   echo
   echo "Re-applying container patches after SSL service restarts..."
   echo -n "  Utility S3→MinIO: "
@@ -1671,8 +1623,8 @@ run_ssl_setup() {
   echo
   echo "  HTTPS setup complete."
   echo "  Keycloak: https://${domain}"
-  [ -n "$vps_domain" ] && echo "  Studio:   https://${vps_domain}"
   [ -n "$vps_domain" ] && echo "  API:      https://${vps_domain}/v1/"
+  [ -n "$vps_domain" ] && echo "  Studio:   run 'bash scripts/init-credebl-studio.sh' to rebuild with HTTPS URLs."
 }
 
 # =============================================================================
@@ -2149,26 +2101,6 @@ echo
 cd "$CREDEBL_DIR"
 mkdir -p .agent-runtime/agent-config .agent-runtime/token .agent-runtime/endpoints
 
-# `docker compose down -v` does NOT remove built images — only containers and
-# volumes. So the Studio image survives a full reset and can be reused, saving
-# several minutes of Next.js build time. Build args (NEXTAUTH_SECRET, API_ENDPOINT,
-# etc.) are baked in at build time — if the VPS IP or secrets changed, force a
-# rebuild by answering N to the question below.
-# docker compose names a build-only service image as <project>-<service>.
-# When run from the credebl/ directory the project name is "credebl", so the
-# Studio image is always "credebl-studio". Check for that specific image name.
-STUDIO_IMAGE="credebl-studio"
-SKIP_STUDIO_BUILD=false
-if docker image inspect "$STUDIO_IMAGE" >/dev/null 2>&1; then
-  echo
-  if ask_yes_no "Studio image already exists. Skip rebuild? (answer N if VPS IP or secrets changed)" "Y"; then
-    SKIP_STUDIO_BUILD=true
-    echo "  Will reuse existing Studio image."
-  else
-    echo "  Will rebuild Studio image."
-  fi
-fi
-
 if ask_yes_no "Clean reset first? (docker compose down -v --remove-orphans)" "Y"; then
   docker compose down -v --remove-orphans
 fi
@@ -2186,23 +2118,10 @@ echo "Pulling images..."
 docker compose pull
 
 echo
-echo "Starting the stack..."
-if [ "$SKIP_STUDIO_BUILD" = "true" ]; then
-  # Image already exists — skip the Next.js build entirely.
-  docker compose up -d --no-build
-else
-  # Build Studio first (docker compose pull skips build-only services, so the
-  # image doesn't exist yet). Then bring up all services without rebuilding.
-  echo "Building Studio image (this may take several minutes)..."
-  docker compose build studio
-  docker compose up -d --no-build
-fi
+echo "Starting the core stack..."
+docker compose up -d --no-build
 
 ensure_minio_setup
-
-echo
-echo "Ensuring email branding assets..."
-ensure_brand_logo
 
 apply_container_patches
 
@@ -2274,9 +2193,12 @@ bash "$SCRIPT_DIR/health-check.sh"
 
 echo
 echo "============================================================"
-echo " Deployment complete"
+echo " Core stack deployed"
 echo "============================================================"
-printf " %-20s %s\n" "Studio:" "$STUDIO_URL"
-printf " %-20s %s\n" "Email:"  "$PLATFORM_ADMIN_EMAIL"
-printf " %-20s %s\n" "Password:" "$PLATFORM_ADMIN_INITIAL_PASSWORD"
+printf " %-20s %s\n" "API Gateway:" "${API_GATEWAY_PROTOCOL:-http}://${API_ENDPOINT}/v1"
+printf " %-20s %s\n" "Admin email:" "$PLATFORM_ADMIN_EMAIL"
+printf " %-20s %s\n" "Admin pass:"  "$PLATFORM_ADMIN_INITIAL_PASSWORD"
+echo
+echo "  Next step — deploy Studio:"
+echo "    bash scripts/init-credebl-studio.sh"
 echo "============================================================"

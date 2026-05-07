@@ -1,0 +1,45 @@
+# =============================================================================
+# CDPI PoC — Keycloak SSL override (nginx + Let's Encrypt)
+# -----------------------------------------------------------------------------
+# Extiende docker-compose.yml con nginx como reverse proxy SSL.
+# Keycloak sigue corriendo en HTTP internamente; nginx termina TLS.
+#
+# Uso (gestionado por init-keycloak.sh):
+#   docker compose -f docker-compose.yml -f docker-compose.ssl.yml up -d
+#
+# Prerequisito: cert en /etc/letsencrypt/live/${DOMAIN}/ (certbot ya corrió)
+# =============================================================================
+
+name: cdpi-keycloak
+
+services:
+
+  # Keycloak: en SSL mode no se expone el puerto HTTP externamente.
+  # nginx es el único punto de entrada público.
+  keycloak:
+    ports: !reset []
+    environment:
+      # Sobrescribe KC_HOSTNAME_URL para usar HTTPS en los tokens y redirects
+      KC_HOSTNAME_URL: https://${DOMAIN}
+      KC_PROXY_HEADERS: xforwarded
+
+  # ── nginx (SSL termination) ─────────────────────────────────────────────────
+  nginx:
+    image: nginx:stable-alpine
+    container_name: keycloak-nginx
+    restart: unless-stopped
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - keycloak-net
+    deploy:
+      resources:
+        limits:
+          memory: 64M

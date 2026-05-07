@@ -1,0 +1,3 @@
+# nginx.conf contiene el dominio real — se puede commitear (no hay secretos),
+# pero si prefieres no versionarlo:
+# nginx.conf
