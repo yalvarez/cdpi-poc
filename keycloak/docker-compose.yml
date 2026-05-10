@@ -65,12 +65,14 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # Keycloak 24+ moves /health/ready to the management port (9000), not 8080.
-      test: ["CMD-SHELL", "curl -sf http://localhost:9000/health/ready || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 90s
+      # Keycloak 25 (ubi9-minimal) does not ship curl in PATH.
+      # Use bash's built-in /dev/tcp to test TCP connectivity on the app port.
+      # Port 8080 only accepts connections after Keycloak has fully started.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
     networks:
       - keycloak-net
     deploy:
