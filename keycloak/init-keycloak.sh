@@ -239,8 +239,14 @@ ok "Servicios iniciados."
 # ── Esperar Keycloak ───────────────────────────────────────────────────────────
 echo ""
 info "Esperando que Keycloak esté listo (puede tomar hasta 90s)..."
-# /health/ready is on the management port 9000, not the app port 8080.
-# Port 9000 is always published (HTTP and SSL modes).
+# HTTP mode:  port 9000 is published → check /health/ready directly.
+# SSL mode:   port 9000 is not published (nginx handles all traffic) →
+#             check /realms/master via the public HTTPS URL instead.
+if [[ "$USE_SSL" == "true" ]]; then
+  KC_CHECK_URL="${KC_PUBLIC_URL}/realms/master"
+else
+  KC_CHECK_URL="http://localhost:9000/health/ready"
+fi
 
 MAX_RETRIES=36   # 36 × 5s = 3 min máximo
 RETRY_DELAY=5
@@ -248,7 +254,7 @@ attempt=0
 
 while [ $attempt -lt $MAX_RETRIES ]; do
   attempt=$((attempt + 1))
-  if curl -sf "http://localhost:9000/health/ready" >/dev/null 2>&1; then
+  if curl -sf "$KC_CHECK_URL" >/dev/null 2>&1; then
     ok "Keycloak listo (${attempt}×${RETRY_DELAY}s)."
     break
   fi
