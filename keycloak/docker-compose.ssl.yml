@@ -14,10 +14,11 @@ name: cdpi-keycloak
 
 services:
 
-  # Keycloak: en SSL mode no se expone el puerto HTTP externamente.
-  # nginx es el único punto de entrada público.
+  # Keycloak: en SSL mode nginx es el único punto de entrada público.
+  # Port 8080 is not exposed; port 9000 (management/health) stays published
+  # so init-keycloak.sh can poll /health/ready from the host.
   keycloak:
-    ports: !reset []
+    ports: !reset ["9000:9000"]
     environment:
       # Sobrescribe KC_HOSTNAME_URL para usar HTTPS en los tokens y redirects
       KC_HOSTNAME_URL: https://${DOMAIN}
