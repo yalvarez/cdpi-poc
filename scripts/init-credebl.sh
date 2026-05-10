@@ -2077,12 +2077,14 @@ mkdir -p .agent-runtime/agent-config .agent-runtime/token .agent-runtime/endpoin
 
 # Verify external Keycloak is reachable before starting (replaces depends_on: keycloak).
 echo "Checking Keycloak connectivity at ${KEYCLOAK_URL} ..."
-KC_HEALTH_URL="${KEYCLOAK_URL}/health/ready"
-KC_RETRIES=6
+# Use /realms/master (app port) — Keycloak 24+ moves /health/ready to the
+# management port (9000) which is not needed for this connectivity check.
+KC_CHECK_URL="${KEYCLOAK_URL}/realms/master"
+KC_RETRIES=8
 KC_OK=false
 for i in $(seq 1 $KC_RETRIES); do
-  HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "$KC_HEALTH_URL" 2>/dev/null || true)"
-  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+  HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "$KC_CHECK_URL" 2>/dev/null || true)"
+  if [ "$HTTP_CODE" = "200" ]; then
     KC_OK=true
     break
   fi
@@ -2091,7 +2093,7 @@ for i in $(seq 1 $KC_RETRIES); do
 done
 if [ "$KC_OK" = "false" ]; then
   echo
-  echo "ERROR: Cannot reach Keycloak at ${KC_HEALTH_URL}"
+  echo "ERROR: Cannot reach Keycloak at ${KC_CHECK_URL}"
   echo "  Make sure init-keycloak.sh and setup-credebl-realm.sh have been run"
   echo "  and that Keycloak is reachable from this host."
   exit 1

@@ -151,9 +151,10 @@ KC_BASE="${KC_BASE:-${KEYCLOAK_PUBLIC_URL:-}}"
 
 if [ -n "$KC_BASE" ]; then
   echo "Checking Keycloak at ${KC_BASE} ..."
-  KC_HEALTH_URL="${KC_BASE}/health/ready"
+  # Use /realms/master (app port 8080) — Keycloak 24+ moves /health/ready to port 9000.
+  KC_HEALTH_URL="${KC_BASE}/realms/master"
   HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "$KC_HEALTH_URL" 2>/dev/null || true)"
-  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+  if [ "$HTTP_CODE" = "200" ]; then
     ok "Keycloak is reachable."
   else
     echo "  WARNING: Keycloak returned HTTP ${HTTP_CODE:-ERR} at ${KC_HEALTH_URL}."
