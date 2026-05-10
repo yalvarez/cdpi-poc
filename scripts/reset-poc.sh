@@ -113,6 +113,41 @@ rm_images_matching() {
   fi
 }
 
+clean_nginx_sites() {
+  # Remove system nginx site configs written by ssl_nginx_certbot (init-credebl.sh).
+  # These are named keycloak-<domain>.conf and vps-<domain>.conf.
+  # Requires root — skips gracefully if not root.
+  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    warn "Not running as root — skipping system nginx config removal."
+    warn "If SSL was set up, remove manually:"
+    warn "  sudo rm /etc/nginx/sites-{available,enabled}/keycloak-*.conf"
+    warn "  sudo rm /etc/nginx/sites-{available,enabled}/vps-*.conf"
+    warn "  sudo systemctl reload nginx"
+    return 0
+  fi
+
+  local removed=0
+  for pattern in "keycloak-*.conf" "vps-*.conf"; do
+    for dir in /etc/nginx/sites-enabled /etc/nginx/sites-available; do
+      for f in "$dir"/$pattern; do
+        [ -e "$f" ] || continue
+        rm -f "$f"
+        removed=$((removed + 1))
+      done
+    done
+  done
+
+  if [ "$removed" -gt 0 ]; then
+    # Restore default site if it was removed
+    [ -f /etc/nginx/sites-available/default ] \
+      && ln -sfn /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+    systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+    ok "Removed $removed nginx config file(s) and reloaded nginx."
+  else
+    echo "  No CDPI nginx site configs found."
+  fi
+}
+
 # ── CREDEBL core ──────────────────────────────────────────────────────────────
 if $RESET_CREDEBL; then
   step "CREDEBL core (cdpi-credebl)"
@@ -140,6 +175,9 @@ if $RESET_CREDEBL; then
 
   info "Removing agent runtime directory..."
   rm -rf "$REPO_DIR/credebl/.agent-runtime" && ok ".agent-runtime removed." || true
+
+  info "Removing nginx site configs (SSL — keycloak-*.conf, vps-*.conf)..."
+  clean_nginx_sites
 
   if $REMOVE_IMAGES; then
     info "Removing CREDEBL pulled images..."
@@ -171,6 +209,19 @@ if $RESET_KEYCLOAK; then
 
   info "Removing .env..."
   rm -f "$REPO_DIR/keycloak/.env" && ok ".env removed." || true
+
+  info "Restoring keycloak/config/nginx.conf to template state..."
+  git -C "$REPO_DIR" checkout -- keycloak/config/nginx.conf 2>/dev/null \
+    && ok "nginx.conf restored (KEYCLOAK_DOMAIN placeholder back in place)." \
+    || warn "Could not restore nginx.conf via git — check manually."
+
+  info "Removing certbot renewal cron job (if present)..."
+  if crontab -l 2>/dev/null | grep -q "keycloak-nginx"; then
+    crontab -l 2>/dev/null | grep -v "keycloak-nginx" | crontab - 2>/dev/null || true
+    ok "Certbot cron job removed."
+  else
+    echo "  No Keycloak certbot cron job found."
+  fi
 
   if $REMOVE_IMAGES; then
     info "Removing Keycloak image..."
