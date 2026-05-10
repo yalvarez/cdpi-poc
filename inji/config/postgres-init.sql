@@ -88,11 +88,14 @@ CREATE TABLE IF NOT EXISTS key_policy_def (
 );
 
 -- Key policies required by mock-identity-system AppConfig.run() on startup
+-- access_allowed='NA' is required: CryptomanagerUtils.hasKeyAccess returns false
+-- when access_allowed IS NULL, which blocks the internal JWTSignature call in
+-- AuthenticationServiceImpl.signKyc() with KER-JWS-108. 'NA' means no restriction.
 INSERT INTO mockidentitysystem.key_policy_def
   (app_id, key_validity_duration, is_active, pre_expire_days, access_allowed, cr_by, cr_dtimes)
 VALUES
-  ('ROOT',                       3650, true, 90, null, 'System', NOW()),
-  ('MOCK_AUTHENTICATION_SERVICE', 730, true, 90, null, 'System', NOW())
+  ('ROOT',                       3650, true, 90, 'NA', 'System', NOW()),
+  ('MOCK_AUTHENTICATION_SERVICE', 730, true, 90, 'NA', 'System', NOW())
 ON CONFLICT (app_id) DO NOTHING;
 
 -- Application tables for mock-identity-system
@@ -189,12 +192,14 @@ CREATE TABLE IF NOT EXISTS key_policy_def (
 );
 
 -- Key policies required by esignet AppConfig.run() on startup
+-- access_allowed='NA' is required: CryptomanagerUtils.hasKeyAccess returns false
+-- when access_allowed IS NULL — this blocks JWT signing with KER-JWS-108.
 INSERT INTO esignet.key_policy_def
   (app_id, key_validity_duration, is_active, pre_expire_days, access_allowed, cr_by, cr_dtimes)
 VALUES
-  ('ROOT',         3650, true, 90, null, 'System', NOW()),
-  ('OIDC_SERVICE',  730, true, 90, null, 'System', NOW()),
-  ('OIDC_PARTNER',  730, true, 90, null, 'System', NOW())
+  ('ROOT',         3650, true, 90, 'NA', 'System', NOW()),
+  ('OIDC_SERVICE',  730, true, 90, 'NA', 'System', NOW()),
+  ('OIDC_PARTNER',  730, true, 90, 'NA', 'System', NOW())
 ON CONFLICT (app_id) DO NOTHING;
 
 -- OIDC client registry (ClientManagementServiceImpl reads this table)
@@ -385,17 +390,19 @@ CREATE TABLE IF NOT EXISTS shedlock (
 --   ROOT, CERTIFY_SERVICE (master), CERTIFY_SERVICE#TRANSACTION_CACHE (uses BASE policy),
 --   CERTIFY_PARTNER, CERTIFY_VC_SIGN_RSA, CERTIFY_VC_SIGN_EC_K1, CERTIFY_VC_SIGN_EC_R1,
 --   CERTIFY_VC_SIGN_ED25519.
+-- access_allowed='NA' is required: CryptomanagerUtils.hasKeyAccess returns false
+-- when access_allowed IS NULL, blocking credential signing with KER-JWS-108.
 INSERT INTO certify.key_policy_def
   (app_id, key_validity_duration, is_active, pre_expire_days, access_allowed, cr_by, cr_dtimes)
 VALUES
-  ('ROOT',                  3650, true, 90, null, 'System', NOW()),
-  ('BASE',                   730, true, 30, null, 'System', NOW()),
-  ('CERTIFY_SERVICE',        730, true, 90, null, 'System', NOW()),
-  ('CERTIFY_PARTNER',        730, true, 90, null, 'System', NOW()),
-  ('CERTIFY_VC_SIGN_RSA',    730, true, 90, null, 'System', NOW()),
-  ('CERTIFY_VC_SIGN_EC_K1',  730, true, 90, null, 'System', NOW()),
-  ('CERTIFY_VC_SIGN_EC_R1',  730, true, 90, null, 'System', NOW()),
-  ('CERTIFY_VC_SIGN_ED25519', 730, true, 90, null, 'System', NOW())
+  ('ROOT',                  3650, true, 90, 'NA', 'System', NOW()),
+  ('BASE',                   730, true, 30, 'NA', 'System', NOW()),
+  ('CERTIFY_SERVICE',        730, true, 90, 'NA', 'System', NOW()),
+  ('CERTIFY_PARTNER',        730, true, 90, 'NA', 'System', NOW()),
+  ('CERTIFY_VC_SIGN_RSA',    730, true, 90, 'NA', 'System', NOW()),
+  ('CERTIFY_VC_SIGN_EC_K1',  730, true, 90, 'NA', 'System', NOW()),
+  ('CERTIFY_VC_SIGN_EC_R1',  730, true, 90, 'NA', 'System', NOW()),
+  ('CERTIFY_VC_SIGN_ED25519', 730, true, 90, 'NA', 'System', NOW())
 ON CONFLICT (app_id) DO NOTHING;
 
 RESET search_path;
