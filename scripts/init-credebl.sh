@@ -836,7 +836,7 @@ ensure_keycloak_openid_scope() {
 
   # Get admin token from Keycloak master realm
   token=$(curl -sf --max-time 15 -X POST \
-    "http://localhost:8080/realms/master/protocol/openid-connect/token" \
+    "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "client_id=admin-cli&username=${KEYCLOAK_ADMIN_USER:-admin}&password=${KEYCLOAK_ADMIN_PASSWORD}&grant_type=password" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2>/dev/null) || true
@@ -847,14 +847,14 @@ ensure_keycloak_openid_scope() {
 
   # Check if scope already exists
   scope_id=$(curl -sf --max-time 10 \
-    "http://localhost:8080/admin/realms/credebl-realm/client-scopes" \
+    "${KEYCLOAK_URL}/admin/realms/credebl-realm/client-scopes" \
     -H "Authorization: Bearer ${token}" \
     | python3 -c 'import json,sys; s=[x["id"] for x in json.load(sys.stdin) if x["name"]=="openid"]; print(s[0] if s else "")' 2>/dev/null) || true
 
   if [ -z "$scope_id" ]; then
     echo "  openid scope missing — creating with oidc-sub-mapper..."
     curl -sf --max-time 15 -X POST \
-      "http://localhost:8080/admin/realms/credebl-realm/client-scopes" \
+      "${KEYCLOAK_URL}/admin/realms/credebl-realm/client-scopes" \
       -H "Authorization: Bearer ${token}" \
       -H "Content-Type: application/json" \
       -d '{
@@ -872,7 +872,7 @@ ensure_keycloak_openid_scope() {
       }' >/dev/null
 
     scope_id=$(curl -sf --max-time 10 \
-      "http://localhost:8080/admin/realms/credebl-realm/client-scopes" \
+      "${KEYCLOAK_URL}/admin/realms/credebl-realm/client-scopes" \
       -H "Authorization: Bearer ${token}" \
       | python3 -c 'import json,sys; s=[x["id"] for x in json.load(sys.stdin) if x["name"]=="openid"]; print(s[0] if s else "")' 2>/dev/null) || true
 
@@ -885,12 +885,12 @@ ensure_keycloak_openid_scope() {
   # Add as default scope to credebl-client and adminClient (idempotent — PUT is no-op if already linked)
   for client_name in credebl-client adminClient; do
     client_id=$(curl -sf --max-time 10 \
-      "http://localhost:8080/admin/realms/credebl-realm/clients?clientId=${client_name}" \
+      "${KEYCLOAK_URL}/admin/realms/credebl-realm/clients?clientId=${client_name}" \
       -H "Authorization: Bearer ${token}" \
       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["id"] if d else "")' 2>/dev/null) || true
     if [ -n "$client_id" ]; then
       curl -sf --max-time 10 -X PUT \
-        "http://localhost:8080/admin/realms/credebl-realm/clients/${client_id}/default-client-scopes/${scope_id}" \
+        "${KEYCLOAK_URL}/admin/realms/credebl-realm/clients/${client_id}/default-client-scopes/${scope_id}" \
         -H "Authorization: Bearer ${token}" >/dev/null || true
       echo "  openid scope linked to ${client_name}."
     fi
@@ -904,7 +904,7 @@ ensure_keycloak_admin_client_redirect_uri() {
   local token client_id current_uris
 
   token=$(curl -sf --max-time 15 -X POST \
-    "http://localhost:8080/realms/master/protocol/openid-connect/token" \
+    "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "client_id=admin-cli&username=${KEYCLOAK_ADMIN_USER:-admin}&password=${KEYCLOAK_ADMIN_PASSWORD}&grant_type=password" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2>/dev/null) || true
@@ -914,7 +914,7 @@ ensure_keycloak_admin_client_redirect_uri() {
   fi
 
   client_id=$(curl -sf --max-time 10 \
-    "http://localhost:8080/admin/realms/credebl-realm/clients?clientId=adminClient" \
+    "${KEYCLOAK_URL}/admin/realms/credebl-realm/clients?clientId=adminClient" \
     -H "Authorization: Bearer ${token}" \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["id"] if d else "")' 2>/dev/null) || true
   if [ -z "$client_id" ]; then
@@ -924,7 +924,7 @@ ensure_keycloak_admin_client_redirect_uri() {
 
   # Check if redirect URI already set
   current_uris=$(curl -sf --max-time 10 \
-    "http://localhost:8080/admin/realms/credebl-realm/clients/${client_id}" \
+    "${KEYCLOAK_URL}/admin/realms/credebl-realm/clients/${client_id}" \
     -H "Authorization: Bearer ${token}" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("redirectUris","[]"))' 2>/dev/null) || true
 
@@ -934,7 +934,7 @@ ensure_keycloak_admin_client_redirect_uri() {
   fi
 
   curl -sf --max-time 15 -X PUT \
-    "http://localhost:8080/admin/realms/credebl-realm/clients/${client_id}" \
+    "${KEYCLOAK_URL}/admin/realms/credebl-realm/clients/${client_id}" \
     -H "Authorization: Bearer ${token}" \
     -H "Content-Type: application/json" \
     -d "{\"redirectUris\": [\"${STUDIO_URL}/*\"]}" >/dev/null
@@ -948,12 +948,12 @@ ensure_keycloak_admin_client_redirect_uri() {
   #   - query-users, query-clients — needed for search endpoints
   local sa_user_id rm_client_id role_json role_id role_name
   sa_user_id=$(curl -sf --max-time 10 \
-    "http://localhost:8080/admin/realms/credebl-realm/clients/${client_id}/service-account-user" \
+    "${KEYCLOAK_URL}/admin/realms/credebl-realm/clients/${client_id}/service-account-user" \
     -H "Authorization: Bearer ${token}" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null) || true
 
   rm_client_id=$(curl -sf --max-time 10 \
-    "http://localhost:8080/admin/realms/credebl-realm/clients?clientId=realm-management" \
+    "${KEYCLOAK_URL}/admin/realms/credebl-realm/clients?clientId=realm-management" \
     -H "Authorization: Bearer ${token}" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])' 2>/dev/null) || true
 
@@ -963,14 +963,14 @@ ensure_keycloak_admin_client_redirect_uri() {
     role_json="["
     for role_name in manage-users view-users query-users manage-clients view-clients query-clients manage-realm view-realm; do
       role_id=$(curl -sf --max-time 10 \
-        "http://localhost:8080/admin/realms/credebl-realm/clients/${rm_client_id}/roles/${role_name}" \
+        "${KEYCLOAK_URL}/admin/realms/credebl-realm/clients/${rm_client_id}/roles/${role_name}" \
         -H "Authorization: Bearer ${token}" \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null) || true
       [ -n "$role_id" ] && role_json="${role_json}{\"id\":\"${role_id}\",\"name\":\"${role_name}\"},"
     done
     role_json="${role_json%,}]"
     curl -sf --max-time 10 -X POST \
-      "http://localhost:8080/admin/realms/credebl-realm/users/${sa_user_id}/role-mappings/clients/${rm_client_id}" \
+      "${KEYCLOAK_URL}/admin/realms/credebl-realm/users/${sa_user_id}/role-mappings/clients/${rm_client_id}" \
       -H "Authorization: Bearer ${token}" \
       -H "Content-Type: application/json" \
       -d "${role_json}" >/dev/null || true
@@ -1232,45 +1232,24 @@ set_env_var() {
 }
 
 ssl_update_env() {
-  local domain="$1" vps_domain="${2:-}"
-  echo "  Updating .env: KEYCLOAK_PUBLIC_URL + KEYCLOAK_DOMAIN → https://${domain}"
-  set_env_var "$ENV_FILE" "KEYCLOAK_PUBLIC_URL" "https://${domain}"
-  # KEYCLOAK_DOMAIN must have trailing slash — CREDEBL validates JWT iss against it
-  set_env_var "$ENV_FILE" "KEYCLOAK_DOMAIN" "https://${domain}/"
-  if [ -n "$vps_domain" ]; then
-    echo "  Updating .env: Studio + API URLs → https://${vps_domain}"
-    set_env_var "$ENV_FILE" "API_GATEWAY_PROTOCOL" "https"
-    # APP_PROTOCOL must stay http: agent-service uses it to call Credo admin ports
-    # (8000-8099) which only listen on HTTP. Nginx handles the HTTPS layer externally.
-    set_env_var "$ENV_FILE" "API_ENDPOINT"          "$vps_domain"
-    set_env_var "$ENV_FILE" "STUDIO_URL"            "https://${vps_domain}"
-    set_env_var "$ENV_FILE" "PLATFORM_WEB_URL"      "https://${vps_domain}"
-    set_env_var "$ENV_FILE" "FRONT_END_URL"         "https://${vps_domain}"
-    set_env_var "$ENV_FILE" "SOCKET_HOST"           "https://${vps_domain}"
-    set_env_var "$ENV_FILE" "ENABLE_CORS_IP_LIST"   "https://${vps_domain},http://localhost:3000,http://127.0.0.1:3000"
-    # Schema file server and MinIO: route through nginx HTTPS proxy so @context URLs
-    # baked into issued credentials and credential offer links are always HTTPS.
-    set_env_var "$ENV_FILE" "SCHEMA_FILE_SERVER_URL"             "https://${vps_domain}/schemas/"
-    set_env_var "$ENV_FILE" "NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL" "https://${vps_domain}/schemas/"
-    set_env_var "$ENV_FILE" "BRAND_LOGO"                         "https://${vps_domain}/credebl-bucket/orgLogos/credebl-logo.png"
-  fi
-}
-
-ssl_restart_keycloak() {
-  echo "  Recreating Keycloak so KC_HOSTNAME picks up the new HTTPS domain..."
-  docker compose up -d --force-recreate keycloak >/dev/null
-}
-
-ssl_wait_for_keycloak() {
-  local attempt
-  echo "  Waiting for Keycloak on http://127.0.0.1:8080..."
-  for attempt in $(seq 1 30); do
-    curl -fsS "http://127.0.0.1:8080/health/ready" >/dev/null 2>&1 \
-      || curl -fsS "http://127.0.0.1:8080" >/dev/null 2>&1 \
-      && { echo "  Keycloak is ready."; return 0; }
-    sleep 2
-  done
-  echo "  Warning: Keycloak did not report ready within 60s — continuing."
+  # Updates .env with HTTPS URLs for the CREDEBL API/Studio VPS domain.
+  # Keycloak URL is external (managed by init-keycloak.sh) — not changed here.
+  local vps_domain="$1"
+  echo "  Updating .env: API + Studio URLs → https://${vps_domain}"
+  set_env_var "$ENV_FILE" "API_GATEWAY_PROTOCOL" "https"
+  # APP_PROTOCOL must stay http: agent-service uses it to call Credo admin ports
+  # (8000-8099) which only listen on HTTP. Nginx handles the HTTPS layer externally.
+  set_env_var "$ENV_FILE" "API_ENDPOINT"          "$vps_domain"
+  set_env_var "$ENV_FILE" "STUDIO_URL"            "https://${vps_domain}"
+  set_env_var "$ENV_FILE" "PLATFORM_WEB_URL"      "https://${vps_domain}"
+  set_env_var "$ENV_FILE" "FRONT_END_URL"         "https://${vps_domain}"
+  set_env_var "$ENV_FILE" "SOCKET_HOST"           "https://${vps_domain}"
+  set_env_var "$ENV_FILE" "ENABLE_CORS_IP_LIST"   "https://${vps_domain},http://localhost:3000,http://127.0.0.1:3000"
+  # Schema file server and MinIO: route through nginx HTTPS proxy so @context URLs
+  # baked into issued credentials and credential offer links are always HTTPS.
+  set_env_var "$ENV_FILE" "SCHEMA_FILE_SERVER_URL"             "https://${vps_domain}/schemas/"
+  set_env_var "$ENV_FILE" "NEXT_PUBLIC_SCHEMA_FILE_SERVER_URL" "https://${vps_domain}/schemas/"
+  set_env_var "$ENV_FILE" "BRAND_LOGO"                         "https://${vps_domain}/credebl-bucket/orgLogos/credebl-logo.png"
 }
 
 ssl_restart_services() {
@@ -1327,7 +1306,7 @@ fi
 
 # ── Check DNS ───────────────────────────────────────────────────────────
 server_ip=$(curl -4 -fsSL ifconfig.me 2>/dev/null || true)
-for d in "$domain" ${vps_domain:+"$vps_domain"}; do
+for d in ${domain:+"$domain"} ${vps_domain:+"$vps_domain"}; do
   resolved=$(getent ahostsv4 "$d" 2>/dev/null | awk 'NR==1{print $1}' || true)
   if [ -z "$resolved" ]; then
     warn "DNS for $d does not resolve yet — certbot may fail."
@@ -1342,7 +1321,9 @@ done
 rm -f /etc/nginx/sites-enabled/default
 mkdir -p "$webroot"
 
-# ── Keycloak HTTP proxy ──────────────────────────────────────────────────
+# ── Keycloak HTTP proxy (only when Keycloak domain is provided) ──────────
+kc_conf=""
+if [ -n "$domain" ]; then
 kc_site="keycloak-${domain//./-}"
 kc_conf="/etc/nginx/sites-available/${kc_site}.conf"
 log "Writing Keycloak HTTP proxy → $kc_conf"
@@ -1368,6 +1349,7 @@ NGINX
 sed -i "s|__DOMAIN__|${domain}|g; s|__WEBROOT__|${webroot}|g; s|__KCPORT__|${kc_port}|g" "$kc_conf"
 ln -sfn "$kc_conf" "/etc/nginx/sites-enabled/${kc_site}.conf"
 reload_nginx
+fi
 
 # ── VPS domain HTTP proxy ────────────────────────────────────────────────
 vps_conf=""
@@ -1424,7 +1406,7 @@ issue_cert() {
   certbot certonly --webroot -w "$webroot" --non-interactive --agree-tos \
     --keep-until-expiring -m "$m" -d "$d"
 }
-issue_cert "$domain" "$email"
+[ -n "$domain" ] && issue_cert "$domain" "$email"
 [ -n "$vps_domain" ] && [ "$vps_domain" != "$domain" ] && issue_cert "$vps_domain" "$email"
 
 # ── Ensure certbot SSL support files exist ───────────────────────────────
@@ -1567,28 +1549,24 @@ SSLEOF
 }
 
 run_ssl_setup() {
-  local domain="$SSL_KEYCLOAK_DOMAIN" vps_domain="${SSL_VPS_DOMAIN:-}"
-  local label="$domain"
-  [ -n "$vps_domain" ] && label="$label + $vps_domain"
+  # Keycloak SSL is managed by init-keycloak.sh — only handle the CREDEBL API/VPS domain.
+  local vps_domain="$SSL_VPS_DOMAIN"
 
   echo
-  echo "Setting up HTTPS for: $label"
+  echo "Setting up HTTPS for CREDEBL API: ${vps_domain}"
 
-  # Step 1 — nginx + certbot (needs root, runs via sudo temp script)
-  ssl_nginx_certbot "$domain" "$vps_domain" "$PLATFORM_ADMIN_EMAIL"
+  # Step 1 — nginx + certbot for VPS domain (needs root, runs via sudo temp script)
+  # Pass empty string as domain arg so the Keycloak nginx block is skipped.
+  ssl_nginx_certbot "" "$vps_domain" "$PLATFORM_ADMIN_EMAIL"
 
-  # Step 2 — update .env with HTTPS URLs
-  ssl_update_env "$domain" "$vps_domain"
+  # Step 2 — update .env with HTTPS URLs (Keycloak URL is unchanged — external)
+  ssl_update_env "$vps_domain"
 
-  # Step 3 — restart Keycloak so KC_HOSTNAME picks up the HTTPS domain
-  ssl_restart_keycloak
-  ssl_wait_for_keycloak
-
-  # Step 4 — restart CREDEBL services so they pick up KEYCLOAK_DOMAIN + HTTPS URLs.
+  # Step 3 — restart CREDEBL services so they pick up HTTPS URLs.
   # This wipes container-filesystem patches (issuance, api-gateway, etc.).
   ssl_restart_services
 
-  # Step 5 — re-apply all container patches after service restarts.
+  # Step 4 — re-apply all container patches after service restarts.
   echo
   echo "Re-applying container patches after SSL service restarts..."
   echo -n "  Utility S3→MinIO: "
@@ -1622,9 +1600,8 @@ run_ssl_setup() {
 
   echo
   echo "  HTTPS setup complete."
-  echo "  Keycloak: https://${domain}"
-  [ -n "$vps_domain" ] && echo "  API:      https://${vps_domain}/v1/"
-  [ -n "$vps_domain" ] && echo "  Studio:   run 'bash scripts/init-credebl-studio.sh' to rebuild with HTTPS URLs."
+  echo "  API:    https://${vps_domain}/v1/"
+  echo "  Studio: run 'bash scripts/init-credebl-studio.sh' to rebuild with HTTPS URLs."
 }
 
 # =============================================================================
@@ -1714,54 +1691,58 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 # =============================================================================
-# INTERACTIVE PROMPTS — 5 questions, 6-7 if SSL is requested
+# INTERACTIVE PROMPTS — 6 questions, +1 if SSL is requested
 # =============================================================================
+# Prerequisite: Keycloak must be running before CREDEBL can start.
+#   Step 1: bash keycloak/init-keycloak.sh         → get KC_PUBLIC_URL + admin password
+#   Step 2: bash keycloak/setup-credebl-realm.sh   → get KEYCLOAK_CLIENT_SECRET
 
-echo "  Answers 5 questions. All secrets are auto-generated and"
+echo "  Answers 6 questions. Most secrets are auto-generated and"
 echo "  printed in full at the end — save that report securely."
 echo
+echo "  Prerequisite: Keycloak must already be running."
+echo "    1. bash keycloak/init-keycloak.sh"
+echo "    2. bash keycloak/setup-credebl-realm.sh"
+echo
 
-# 1. VPS host — autodetect with fallback
+# 1. CREDEBL API host — autodetect with fallback
 DETECTED_IP="$(curl -4 -fsS --max-time 5 ifconfig.me 2>/dev/null \
   || hostname -I 2>/dev/null | awk '{print $1}' \
   || true)"
 DETECTED_IP="$(sanitize_host "${DETECTED_IP:-}")"
 
-VPS_HOST="$(ask "VPS public IP or hostname (without http://)" "$DETECTED_IP")"
+VPS_HOST="$(ask "CREDEBL API host — public IP or hostname (without http://)" "$DETECTED_IP")"
 VPS_HOST="$(sanitize_host "$VPS_HOST")"
 
-# 2. Keycloak host — default to same VPS but can be different
-KEYCLOAK_HOST="$(ask "Keycloak host (press Enter if same as VPS)" "$VPS_HOST")"
-KEYCLOAK_HOST="$(sanitize_host "$KEYCLOAK_HOST")"
+# 2. Keycloak URL — full URL of the external Keycloak instance
+echo >&2
+KEYCLOAK_URL="$(ask "Keycloak URL (e.g. http://35.x.x.x:8080 or https://keycloak.example.com)")"
+KEYCLOAK_URL="${KEYCLOAK_URL%/}"  # strip trailing slash
+# Extract bare hostname for extra_hosts mapping (strips protocol + port)
+KEYCLOAK_HOST="$(sanitize_host "$KEYCLOAK_URL")"
 
-# 3. Platform admin email
+# 3. Keycloak admin password — generated by init-keycloak.sh
+KEYCLOAK_ADMIN_PASSWORD="$(ask "Keycloak admin password (from init-keycloak.sh output)" "" "true")"
+
+# 4. Keycloak client secret — generated by setup-credebl-realm.sh
+KEYCLOAK_CLIENT_SECRET="$(ask "Keycloak client secret (KEYCLOAK_CLIENT_SECRET from setup-credebl-realm.sh output)")"
+
+# 5. Platform admin email
 PLATFORM_ADMIN_EMAIL="$(ask "Platform admin email" "admin@cdpi-poc.local")"
 
-# 4. SSL / Let's Encrypt
+# 6. SSL / Let's Encrypt for CREDEBL API
+# Keycloak SSL is managed separately by init-keycloak.sh.
 ENABLE_SSL=false
-SSL_KEYCLOAK_DOMAIN=""
 SSL_VPS_DOMAIN=""
-if ask_yes_no "Enable HTTPS with Let's Encrypt certificates?" "N"; then
+if ask_yes_no "Enable HTTPS for the CREDEBL API with Let's Encrypt?" "N"; then
   ENABLE_SSL=true
-
-  # 5a. Keycloak domain — suggest KEYCLOAK_HOST only if it looks like an FQDN, not a raw IP
-  _kc_default="$KEYCLOAK_HOST"
-  printf '%s' "$KEYCLOAK_HOST" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' && _kc_default=""
-  SSL_KEYCLOAK_DOMAIN="$(ask "Keycloak domain for the SSL certificate (DNS must point to this VPS)" "$_kc_default")"
-  SSL_KEYCLOAK_DOMAIN="$(sanitize_host "$SSL_KEYCLOAK_DOMAIN")"
-
-  # 5b. General VPS domain (optional) — for API Gateway / Studio; skipped when same as Keycloak domain
   _vps_default="$VPS_HOST"
   printf '%s' "$VPS_HOST" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' && _vps_default=""
-  if [ -z "$_vps_default" ] || [ "$_vps_default" != "$SSL_KEYCLOAK_DOMAIN" ]; then
-    if ask_yes_no "Also issue an SSL certificate for the general VPS domain (API / Studio)?" "N"; then
-      SSL_VPS_DOMAIN="$(ask "General VPS domain for the SSL certificate (DNS must point to this VPS)" "$_vps_default")"
-      SSL_VPS_DOMAIN="$(sanitize_host "$SSL_VPS_DOMAIN")"
-    fi
-  fi
+  SSL_VPS_DOMAIN="$(ask "VPS domain for the SSL certificate (DNS must point to this VPS)" "$_vps_default")"
+  SSL_VPS_DOMAIN="$(sanitize_host "$SSL_VPS_DOMAIN")"
 fi
 
-# 5. Email provider
+# 7. Email provider
 EMAIL_PROVIDER_CHOICE="mailpit"
 SENDGRID_API_KEY_VAL="SG.mock-not-used"
 EMAIL_FROM_VAL="noreply@cdpi-poc.local"
@@ -1811,10 +1792,10 @@ esac
 # =============================================================================
 # GENERATE ALL SECRETS
 # =============================================================================
+# KEYCLOAK_ADMIN_PASSWORD and KEYCLOAK_CLIENT_SECRET are provided by the user
+# (from init-keycloak.sh and setup-credebl-realm.sh respectively).
 
 POSTGRES_PASSWORD="$(openssl rand -hex 16)"
-KEYCLOAK_ADMIN_PASSWORD="$(openssl rand -hex 16)"
-KEYCLOAK_CLIENT_SECRET="$(openssl rand -hex 32)"
 PLATFORM_ADMIN_INITIAL_PASSWORD="$(openssl rand -hex 8)"   # 16 hex chars — easy to type
 MINIO_ROOT_PASSWORD="$(openssl rand -hex 16)"
 AWS_ACCESS_KEY_ID="credebls3"
@@ -1847,20 +1828,13 @@ SCHEMA_FILE_SERVER_TOKEN="$(generate_hs256_jwt "$JWT_TOKEN_SECRET" "Credebl")"
 
 PROTOCOL="http"
 
-# Internal URLs — CREDEBL microservices reach Keycloak inside Docker.
-# Always use the Docker service name for internal traffic; Keycloak runs in the
-# same Docker Compose stack regardless of what public subdomain it is assigned.
-# Using the external hostname here causes the admin API to return 403 when
-# KC_HOSTNAME is set to an HTTPS domain (issuer mismatch on the admin API path).
-KEYCLOAK_DOMAIN_INTERNAL="http://keycloak:8080/"
-KEYCLOAK_ADMIN_URL_INTERNAL="http://keycloak:8080"
-
-# Public URL — used by wallets and browsers; becomes HTTPS when SSL is enabled
-if [ "$ENABLE_SSL" = "true" ]; then
-  KEYCLOAK_PUBLIC_URL="https://${SSL_KEYCLOAK_DOMAIN}"
-else
-  KEYCLOAK_PUBLIC_URL="http://${KEYCLOAK_HOST}:8080"
-fi
+# Keycloak is now an external standalone stack (keycloak/).
+# All three variables point to the same user-provided URL.
+# KEYCLOAK_DOMAIN requires a trailing slash (CREDEBL uses it as a JWT issuer
+# prefix — the 'iss' claim in Keycloak tokens ends with '/').
+KEYCLOAK_PUBLIC_URL="${KEYCLOAK_URL}"
+KEYCLOAK_DOMAIN_INTERNAL="${KEYCLOAK_URL}/"
+KEYCLOAK_ADMIN_URL_INTERNAL="${KEYCLOAK_URL}"
 
 # When a VPS domain with SSL is configured, Studio and the API gateway are both
 # served from that domain via nginx on port 443 — no bare port in the URL.
@@ -1910,7 +1884,7 @@ export ENV_TEMPLATE ENV_FILE MASTER_TABLE \
   PLATFORM_SEED PLATFORM_WALLET_NAME PLATFORM_WALLET_PASSWORD \
   AGENT_API_KEY JWT_SECRET NEXTAUTH_SECRET JWT_TOKEN_SECRET \
   SCHEMA_FILE_SERVER_TOKEN CRYPTO_PRIVATE_KEY ADMIN_KEYCLOAK_ID ADMIN_KEYCLOAK_SECRET \
-  PLATFORM_ADMIN_EMAIL VPS_HOST VPS_PUBLIC_HOST KEYCLOAK_HOST PROTOCOL \
+  PLATFORM_ADMIN_EMAIL VPS_HOST VPS_PUBLIC_HOST KEYCLOAK_URL KEYCLOAK_HOST PROTOCOL \
   KEYCLOAK_DOMAIN_INTERNAL KEYCLOAK_ADMIN_URL_INTERNAL KEYCLOAK_PUBLIC_URL \
   STUDIO_URL API_ENDPOINT PLATFORM_WEB_URL SOCKET_HOST ENABLE_CORS_IP_LIST DEEPLINK_DOMAIN \
   EMAIL_PROVIDER_CHOICE SENDGRID_API_KEY_VAL EMAIL_FROM_VAL \
@@ -2056,17 +2030,17 @@ echo "============================================================"
 echo " CREDENTIALS REPORT — save this before continuing"
 echo "============================================================"
 printf " %-28s %s\n" "VPS host:"               "$VPS_HOST"
-printf " %-28s %s\n" "Keycloak host:"           "$KEYCLOAK_HOST"
-printf " %-28s %s\n" "Keycloak public URL:"     "$KEYCLOAK_PUBLIC_URL"
+printf " %-28s %s\n" "Keycloak URL:"            "$KEYCLOAK_URL"
 printf " %-28s %s\n" "Studio URL:"              "$STUDIO_URL"
 printf " %-28s %s\n" "API URL:"                 "$PLATFORM_WEB_URL"
 echo " ----------------------------------------------------------"
 printf " %-28s %s\n" "Studio email:"            "$PLATFORM_ADMIN_EMAIL"
 printf " %-28s %s\n" "Studio password:"         "$PLATFORM_ADMIN_INITIAL_PASSWORD"
 echo " ----------------------------------------------------------"
+printf " %-28s %s\n" "Keycloak admin password:" "$KEYCLOAK_ADMIN_PASSWORD  (from init-keycloak.sh)"
+printf " %-28s %s\n" "Keycloak client secret:"  "$KEYCLOAK_CLIENT_SECRET  (from setup-credebl-realm.sh)"
+echo " ----------------------------------------------------------"
 printf " %-28s %s\n" "Postgres password:"       "$POSTGRES_PASSWORD"
-printf " %-28s %s\n" "Keycloak admin password:" "$KEYCLOAK_ADMIN_PASSWORD"
-printf " %-28s %s\n" "Keycloak client secret:"  "$KEYCLOAK_CLIENT_SECRET"
 printf " %-28s %s\n" "MinIO root password:"     "$MINIO_ROOT_PASSWORD"
 printf " %-28s %s\n" "MinIO access key ID:"     "$AWS_ACCESS_KEY_ID"
 printf " %-28s %s\n" "MinIO secret key:"        "$AWS_SECRET_ACCESS_KEY"
@@ -2100,6 +2074,29 @@ echo
 
 cd "$CREDEBL_DIR"
 mkdir -p .agent-runtime/agent-config .agent-runtime/token .agent-runtime/endpoints
+
+# Verify external Keycloak is reachable before starting (replaces depends_on: keycloak).
+echo "Checking Keycloak connectivity at ${KEYCLOAK_URL} ..."
+KC_HEALTH_URL="${KEYCLOAK_URL}/health/ready"
+KC_RETRIES=6
+KC_OK=false
+for i in $(seq 1 $KC_RETRIES); do
+  HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 "$KC_HEALTH_URL" 2>/dev/null || true)"
+  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+    KC_OK=true
+    break
+  fi
+  echo "  Keycloak not ready yet (HTTP ${HTTP_CODE:-ERR}), retry $i/$KC_RETRIES in 10s..."
+  sleep 10
+done
+if [ "$KC_OK" = "false" ]; then
+  echo
+  echo "ERROR: Cannot reach Keycloak at ${KC_HEALTH_URL}"
+  echo "  Make sure init-keycloak.sh and setup-credebl-realm.sh have been run"
+  echo "  and that Keycloak is reachable from this host."
+  exit 1
+fi
+echo "  Keycloak is up."
 
 if ask_yes_no "Clean reset first? (docker compose down -v --remove-orphans)" "Y"; then
   docker compose down -v --remove-orphans

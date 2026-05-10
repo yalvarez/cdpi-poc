@@ -104,47 +104,6 @@ services:
         limits:
           memory: 256M
 
-  # ── Keycloak (OIDC provider + mock for PoC) ─────────────────────────────────
-  keycloak:
-    image: quay.io/keycloak/keycloak:25.0.6
-    container_name: credebl-keycloak
-    restart: unless-stopped
-    command: start-dev --import-realm
-    env_file: .env
-    environment:
-      KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-credebl}
-      KC_DB_USERNAME: ${POSTGRES_USER:-credebl}
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
-      KC_DB_SCHEMA: keycloak
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-      KC_HTTP_PORT: 8080
-      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL}
-      KC_HOSTNAME_STRICT: "false"
-      KC_HTTP_ENABLED: "true"
-      KC_HEALTH_ENABLED: "true"
-      KC_PROXY_HEADERS: xforwarded
-    volumes:
-      - ./config/keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000; printf \"GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; grep -q \"200 OK\" <&3'"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 20s
-    networks:
-      - credebl-net
-    deploy:
-      resources:
-        limits:
-          memory: 768M
-
   # ── MinIO (S3-compatible — replaces AWS S3) ─────────────────────────────────
   minio:
     image: minio/minio:latest
@@ -264,18 +223,16 @@ services:
       npx prisma migrate deploy --schema=./libs/prisma-service/prisma/schema.prisma &&
       npx ts-node ./libs/prisma-service/prisma/seed.ts'
     env_file: .env
-    environment:
-      # The seed container reaches Keycloak only for initial user creation — it does
-      # not validate JWT iss claims. Always use the internal Docker URL so the seed
-      # works regardless of whether SSL is enabled on the public Keycloak domain.
-      KEYCLOAK_DOMAIN: "http://keycloak:8080/"
-      KEYCLOAK_ADMIN_URL: "http://keycloak:8080"
+    # KEYCLOAK_DOMAIN and KEYCLOAK_ADMIN_URL come from .env (set by init-credebl.sh
+    # to the external Keycloak URL). extra_hosts maps the Keycloak hostname to
+    # host-gateway so containers on credebl-net can reach Keycloak on the same VPS.
+    extra_hosts:
+      - "${VPS_IP}:host-gateway"
+      - "${KEYCLOAK_HOST}:host-gateway"
     volumes:
       - ./config/credebl-master-table.json:/app/prisma/data/credebl-master-table/credebl-master-table.json:ro
     depends_on:
       postgres:
-        condition: service_healthy
-      keycloak:
         condition: service_healthy
     networks:
       - credebl-net
@@ -290,12 +247,13 @@ services:
       - /bin/sh
       - -c
       - apk add --no-cache curl jq >/dev/null && /bin/sh /work/bootstrap-platform-admin.sh
+    extra_hosts:
+      - "${VPS_IP}:host-gateway"
+      - "${KEYCLOAK_HOST}:host-gateway"
     volumes:
       - ../scripts/bootstrap-platform-admin.sh:/work/bootstrap-platform-admin.sh:ro
     depends_on:
       postgres:
-        condition: service_healthy
-      keycloak:
         condition: service_healthy
       seed:
         condition: service_completed_successfully
