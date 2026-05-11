@@ -1,46 +1,27 @@
 # =============================================================================
-# CDPI PoC — Keycloak SSL override (nginx + Let's Encrypt)
+# CDPI PoC — Keycloak SSL override (nginx del sistema + Let's Encrypt)
 # -----------------------------------------------------------------------------
-# Extiende docker-compose.yml con nginx como reverse proxy SSL.
-# Keycloak sigue corriendo en HTTP internamente; nginx termina TLS.
+# Extiende docker-compose.yml con overrides para SSL.
+# Keycloak sigue corriendo en HTTP internamente; los puertos 8080 y 9000
+# siguen publicados. El nginx del sistema (instalado por init-keycloak.sh)
+# termina TLS en el puerto 443 y hace proxy a 127.0.0.1:8080.
 #
 # Uso (gestionado por init-keycloak.sh):
 #   docker compose -f docker-compose.yml -f docker-compose.ssl.yml up -d
 #
-# Prerequisito: cert en /etc/letsencrypt/live/${DOMAIN}/ (certbot ya corrió)
+# Prerequisito: nginx configurado y cert en /etc/letsencrypt/live/${DOMAIN}/
+#               (init-keycloak.sh los configura automáticamente)
 # =============================================================================
 
 name: cdpi-keycloak
 
 services:
 
-  # Keycloak: en SSL mode nginx es el único punto de entrada público.
-  # No ports are published externally; nginx handles 80/443.
-  # init-keycloak.sh polls via the HTTPS URL (not localhost:9000) in SSL mode.
+  # Keycloak: publica 8080 y 9000 igual que en modo HTTP.
+  # El nginx del sistema en el host enruta el tráfico HTTPS (443) a 127.0.0.1:8080.
+  # El puerto 9000 (management) queda accesible para el health-check del script.
   keycloak:
-    ports: !reset []
     environment:
-      # Sobrescribe KC_HOSTNAME_URL para usar HTTPS en los tokens y redirects
+      # Keycloak genera tokens y redirects con la URL pública HTTPS
       KC_HOSTNAME_URL: https://${DOMAIN}
       KC_PROXY_HEADERS: xforwarded
-
-  # ── nginx (SSL termination) ─────────────────────────────────────────────────
-  nginx:
-    image: nginx:stable-alpine
-    container_name: keycloak-nginx
-    restart: unless-stopped
-    volumes:
-      - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      keycloak:
-        condition: service_healthy
-    networks:
-      - keycloak-net
-    deploy:
-      resources:
-        limits:
-          memory: 64M

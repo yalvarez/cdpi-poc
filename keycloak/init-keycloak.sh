@@ -157,51 +157,121 @@ POSTGRES_PORT=5434
 EOF
   ok ".env generado."
 
-  # ── SSL: certbot ───────────────────────────────────────────────────────────
+  # ── SSL: nginx del sistema + certbot --webroot ────────────────────────────
   if $USE_SSL; then
     echo ""
-    info "Configurando certificado SSL con Let's Encrypt..."
+    info "Configurando nginx + Let's Encrypt para ${DOMAIN}..."
+    [ "${EUID:-$(id -u)}" -ne 0 ] && die "SSL requiere permisos de root. Corre: sudo bash init-keycloak.sh"
 
-    # Verificar / instalar certbot
-    if ! command -v certbot >/dev/null 2>&1; then
-      info "certbot no encontrado — instalando..."
+    webroot="/var/www/certbot"
+
+    # Instalar nginx + certbot si es necesario
+    if ! command -v nginx >/dev/null 2>&1 || ! command -v certbot >/dev/null 2>&1; then
+      info "Instalando nginx y certbot..."
       if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -qq && apt-get install -y -qq certbot
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get install -y -qq nginx certbot python3-certbot-nginx curl openssl ufw
       elif command -v yum >/dev/null 2>&1; then
-        yum install -y -q certbot
+        yum install -y -q nginx certbot python3-certbot-nginx
       else
-        die "No se pudo instalar certbot automáticamente. Instálalo manualmente y vuelve a correr este script."
+        die "No se pudo instalar nginx/certbot automáticamente. Instálalos y vuelve a intentar."
       fi
     fi
 
-    # Verificar que el puerto 80 esté libre antes del challenge
-    if ss -tlnp 2>/dev/null | grep -q ':80 '; then
-      warn "El puerto 80 está ocupado. Detén el servicio que lo usa antes de continuar."
-      warn "Ej: systemctl stop apache2  o  systemctl stop nginx"
-      ask_yn CONTINUE_ANYWAY "¿Continuar de todas formas (certbot puede fallar)?" "n"
-      $CONTINUE_ANYWAY || die "Abortar. Libera el puerto 80 y vuelve a intentar."
+    systemctl enable nginx >/dev/null 2>&1 || true
+    systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || true
+    mkdir -p "$webroot"
+    rm -f /etc/nginx/sites-enabled/default
+
+    # Abrir firewall si está activo
+    if command -v ufw >/dev/null 2>&1; then
+      ufw allow 80/tcp  comment 'HTTP ACME'   >/dev/null 2>&1 || true
+      ufw allow 443/tcp comment 'HTTPS nginx' >/dev/null 2>&1 || true
     fi
 
-    info "Solicitando certificado para ${DOMAIN}..."
-    certbot certonly \
-      --standalone \
-      --non-interactive \
-      --agree-tos \
-      --register-unsafely-without-email \
-      --domain "$DOMAIN" \
-      --http-01-port 80 \
-      || die "certbot falló. Verifica que ${DOMAIN} apunte a este servidor y el puerto 80 esté accesible."
+    kc_site="keycloak-${DOMAIN//./-}"
+    kc_conf="/etc/nginx/sites-available/${kc_site}.conf"
 
+    # Bloque HTTP temporal para el challenge ACME
+    cat > "$kc_conf" << NGINX
+server {
+    listen 80; listen [::]:80;
+    server_name ${DOMAIN};
+    client_max_body_size 25m;
+    location /.well-known/acme-challenge/ { root ${webroot}; default_type "text/plain"; }
+    location / {
+        proxy_pass http://127.0.0.1:${KC_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_buffering off;
+    }
+}
+NGINX
+    ln -sfn "$kc_conf" "/etc/nginx/sites-enabled/${kc_site}.conf"
+    nginx -t && (systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true)
+
+    # Solicitar certificado con método webroot (nginx ya está corriendo)
+    info "Solicitando certificado para ${DOMAIN}..."
+    certbot certonly --webroot -w "$webroot" --non-interactive --agree-tos \
+      --register-unsafely-without-email --keep-until-expiring -d "$DOMAIN" \
+      || die "certbot falló. Verifica que ${DOMAIN} apunte a este servidor y el puerto 80 esté accesible."
     ok "Certificado obtenido: /etc/letsencrypt/live/${DOMAIN}/"
 
-    # Generar nginx.conf con el dominio real
-    sed "s/KEYCLOAK_DOMAIN/${DOMAIN}/g" config/nginx.conf > /tmp/kc_nginx.conf
-    cp /tmp/kc_nginx.conf config/nginx.conf
-    ok "nginx.conf configurado para ${DOMAIN}."
+    # Archivos de soporte SSL (los crea certbot --nginx; con --webroot los creamos manualmente)
+    if [ ! -f /etc/letsencrypt/options-ssl-nginx.conf ]; then
+      cat > /etc/letsencrypt/options-ssl-nginx.conf << 'SSLCONF'
+ssl_session_cache shared:le_nginx_SSL:10m;
+ssl_session_timeout 1440m;
+ssl_session_tickets off;
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
+SSLCONF
+    fi
+    if [ ! -f /etc/letsencrypt/ssl-dhparams.pem ]; then
+      info "Generando parámetros DH (tarda ~5–15s)..."
+      openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048 2>/dev/null
+    fi
+
+    # Actualizar bloque nginx a HTTPS completo
+    cat > "$kc_conf" << NGINX
+server {
+    listen 80; listen [::]:80;
+    server_name ${DOMAIN};
+    location /.well-known/acme-challenge/ { root ${webroot}; default_type "text/plain"; }
+    location / { return 301 https://\$host\$request_uri; }
+}
+server {
+    listen 443 ssl http2; listen [::]:443 ssl http2;
+    server_name ${DOMAIN};
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    client_max_body_size 25m;
+    location / {
+        proxy_pass http://127.0.0.1:${KC_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_buffering off;
+    }
+}
+NGINX
+    nginx -t && (systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true)
+    ok "nginx configurado para ${DOMAIN}."
 
     # Renovación automática via cron (si no existe ya)
     if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
-      (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && docker exec keycloak-nginx nginx -s reload") | crontab -
+      (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null") | crontab -
       ok "Cron de renovación automática configurado (3:00 AM diario)."
     fi
   fi
@@ -239,14 +309,8 @@ ok "Servicios iniciados."
 # ── Esperar Keycloak ───────────────────────────────────────────────────────────
 echo ""
 info "Esperando que Keycloak esté listo (puede tomar hasta 90s)..."
-# HTTP mode:  port 9000 is published → check /health/ready directly.
-# SSL mode:   port 9000 is not published (nginx handles all traffic) →
-#             check /realms/master via the public HTTPS URL instead.
-if [[ "$USE_SSL" == "true" ]]; then
-  KC_CHECK_URL="${KC_PUBLIC_URL}/realms/master"
-else
-  KC_CHECK_URL="http://localhost:9000/health/ready"
-fi
+# Puerto 9000 (management) siempre publicado — válido en modo HTTP y SSL.
+KC_CHECK_URL="http://localhost:9000/health/ready"
 
 MAX_RETRIES=36   # 36 × 5s = 3 min máximo
 RETRY_DELAY=5

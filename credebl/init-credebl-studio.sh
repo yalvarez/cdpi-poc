@@ -207,6 +207,173 @@ fi
 
 ok "Studio container started."
 
+# --- SSL: system nginx + certbot for Studio domain ---------------------------
+# Only runs when STUDIO_URL starts with https:// (user entered an https domain).
+
+if [[ "$STUDIO_URL" == https://* ]]; then
+  STUDIO_DOMAIN="${STUDIO_URL#https://}"
+  STUDIO_DOMAIN="${STUDIO_DOMAIN%%/*}"    # strip any trailing path
+
+  echo
+  echo "HTTPS detected — configuring nginx + Let's Encrypt for Studio domain: ${STUDIO_DOMAIN}"
+
+  STUDIO_SSL_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@cdpi-poc.local}"
+  STUDIO_WEBROOT="/var/www/certbot"
+
+  studio_ssl_tmp=$(mktemp /tmp/studio_ssl_XXXXXX.sh)
+  chmod 700 "$studio_ssl_tmp"
+
+  cat > "$studio_ssl_tmp" << 'SSLEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+studio_domain="$1"; email="$2"; webroot="$3"
+
+log()  { echo "  [Studio SSL] $*"; }
+
+reload_nginx() {
+  nginx -t
+  systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || nginx -s reload
+}
+
+cert_is_valid() {
+  local cert="/etc/letsencrypt/live/${1}/fullchain.pem"
+  [ -f "$cert" ] && openssl x509 -checkend 86400 -noout -in "$cert" 2>/dev/null
+}
+
+# Install packages if missing
+if ! command -v nginx >/dev/null 2>&1 || ! command -v certbot >/dev/null 2>&1; then
+  log "Installing nginx + certbot..."
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq nginx certbot python3-certbot-nginx curl openssl ufw
+fi
+
+systemctl enable nginx >/dev/null 2>&1 || true
+systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || true
+mkdir -p "$webroot"
+rm -f /etc/nginx/sites-enabled/default
+
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow 80/tcp  comment 'HTTP ACME'   >/dev/null 2>&1 || true
+  ufw allow 443/tcp comment 'HTTPS nginx' >/dev/null 2>&1 || true
+fi
+
+studio_site="studio-${studio_domain//./-}"
+studio_conf="/etc/nginx/sites-available/${studio_site}.conf"
+
+# HTTP block for ACME challenge
+cat > "$studio_conf" << 'NGINX'
+server {
+    listen 80; listen [::]:80;
+    server_name __DOMAIN__;
+    client_max_body_size 25m;
+    location /.well-known/acme-challenge/ { root __WEBROOT__; default_type "text/plain"; }
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+    }
+}
+NGINX
+sed -i "s|__DOMAIN__|${studio_domain}|g; s|__WEBROOT__|${webroot}|g" "$studio_conf"
+ln -sfn "$studio_conf" "/etc/nginx/sites-enabled/${studio_site}.conf"
+reload_nginx
+
+# Issue certificate
+if cert_is_valid "$studio_domain"; then
+  log "Certificate for ${studio_domain} is still valid — skipping."
+else
+  log "Requesting Let's Encrypt certificate for ${studio_domain}..."
+  certbot certonly --webroot -w "$webroot" --non-interactive --agree-tos \
+    --keep-until-expiring -m "$email" -d "$studio_domain"
+fi
+
+# Ensure certbot SSL support files
+if [ ! -f /etc/letsencrypt/options-ssl-nginx.conf ]; then
+  cat > /etc/letsencrypt/options-ssl-nginx.conf << 'SSLCONF'
+ssl_session_cache shared:le_nginx_SSL:10m;
+ssl_session_timeout 1440m;
+ssl_session_tickets off;
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
+SSLCONF
+fi
+if [ ! -f /etc/letsencrypt/ssl-dhparams.pem ]; then
+  log "Generating DH parameters (~5-15s)..."
+  openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048 2>/dev/null
+fi
+
+# Upgrade to HTTPS
+cat > "$studio_conf" << 'NGINX'
+server {
+    listen 80; listen [::]:80;
+    server_name __DOMAIN__;
+    location /.well-known/acme-challenge/ { root __WEBROOT__; default_type "text/plain"; }
+    location / { return 301 https://$host$request_uri; }
+}
+server {
+    listen 443 ssl http2; listen [::]:443 ssl http2;
+    server_name __DOMAIN__;
+    ssl_certificate /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    client_max_body_size 25m;
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+    }
+}
+NGINX
+sed -i "s|__DOMAIN__|${studio_domain}|g; s|__WEBROOT__|${webroot}|g" "$studio_conf"
+reload_nginx
+
+# Auto-renewal cron
+if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
+  (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null") | crontab -
+  log "Auto-renewal cron configured (daily 3 AM)."
+fi
+
+log "nginx + certbot setup complete for ${studio_domain}."
+SSLEOF
+
+  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    echo "  SSL requires root — running nginx/certbot step with sudo..."
+    sudo bash "$studio_ssl_tmp" "$STUDIO_DOMAIN" "$STUDIO_SSL_EMAIL" "$STUDIO_WEBROOT"
+  else
+    bash "$studio_ssl_tmp" "$STUDIO_DOMAIN" "$STUDIO_SSL_EMAIL" "$STUDIO_WEBROOT"
+  fi
+  rm -f "$studio_ssl_tmp"
+
+  # Add HTTPS Studio origin to CREDEBL API gateway CORS list
+  HTTPS_STUDIO_ORIGIN="https://${STUDIO_DOMAIN}"
+  CURRENT_CORS=$(grep "^ENABLE_CORS_IP_LIST=" "$ENV_FILE" | cut -d= -f2-)
+  if [ -n "$CURRENT_CORS" ] && ! echo "$CURRENT_CORS" | grep -qF "$HTTPS_STUDIO_ORIGIN"; then
+    NEW_CORS="${CURRENT_CORS},${HTTPS_STUDIO_ORIGIN}"
+    set_env_var "$ENV_FILE" "ENABLE_CORS_IP_LIST" "$NEW_CORS"
+    ok "Added ${HTTPS_STUDIO_ORIGIN} to ENABLE_CORS_IP_LIST — restarting API gateway..."
+    cd "$CREDEBL_DIR"
+    docker compose restart api-gateway >/dev/null
+    cd "$STUDIO_DIR"
+  fi
+
+  ok "Studio SSL configured: https://${STUDIO_DOMAIN}"
+fi
+
 # --- Final summary -----------------------------------------------------------
 
 echo

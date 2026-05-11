@@ -1261,7 +1261,7 @@ ssl_nginx_certbot() {
   # Installs nginx + certbot, writes proxy configs, issues Let's Encrypt certs.
   # This block needs root — the real work happens inside a temp bash script
   # so we can sudo just this section without re-running the whole init.
-  local domain="$1" vps_domain="${2:-}" email="$3"
+  local domain="$1" vps_domain="${2:-}" email="$3" credo_port="${4:-8001}"
   local tmp
   tmp=$(mktemp /tmp/ssl_setup_XXXXXX.sh)
   chmod 700 "$tmp"
@@ -1272,7 +1272,7 @@ ssl_nginx_certbot() {
   cat > "$tmp" << 'SSLEOF'
 #!/usr/bin/env bash
 set -euo pipefail
-domain="$1"; vps_domain="${2:-}"; email="$3"
+domain="$1"; vps_domain="${2:-}"; email="$3"; credo_port="${4:-8001}"
 webroot="/var/www/certbot"
 kc_port=8080
 
@@ -1363,9 +1363,6 @@ server {
     server_name __VPSDOMAIN__;
     client_max_body_size 25m;
     location /.well-known/acme-challenge/ { root __WEBROOT__; default_type "text/plain"; }
-    location ^~ /api/auth/ {
-        proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;
-        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto http; proxy_buffering off; }
     location ~ ^/(api|api-json)$ {
         proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
         proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto http; proxy_buffering off; }
@@ -1383,11 +1380,6 @@ server {
         proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
         proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto http;
         proxy_read_timeout 86400; proxy_buffering off; }
-    location / {
-        proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;
-        proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
-        proxy_set_header X-Forwarded-Proto http; proxy_buffering off; }
 }
 NGINX
   sed -i "s|__VPSDOMAIN__|${vps_domain}|g; s|__WEBROOT__|${webroot}|g" "$vps_conf"
@@ -1481,9 +1473,6 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
     client_max_body_size 25m;
-    location ^~ /api/auth/ {
-        proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;
-        proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; proxy_buffering off; }
     location ~ ^/(api|api-json)$ {
         proxy_pass http://127.0.0.1:5000; proxy_http_version 1.1;
         proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; proxy_buffering off; }
@@ -1513,26 +1502,21 @@ server {
         proxy_set_header Host $host;
         proxy_buffering off; }
     location /oid4vci/ {
-        proxy_pass http://127.0.0.1:8001;
+        proxy_pass http://127.0.0.1:__CREDOPORT__;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
         proxy_buffering off; }
     location /wh/ {
-        proxy_pass http://127.0.0.1:8001;
+        proxy_pass http://127.0.0.1:__CREDOPORT__;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto https;
         proxy_buffering off; }
-    location / {
-        proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1;
-        proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
-        proxy_set_header X-Forwarded-Proto https; proxy_buffering off; }
 }
 NGINX
-  sed -i "s|__VPSDOMAIN__|${vps_domain}|g; s|__WEBROOT__|${webroot}|g" "$vps_conf"
+  sed -i "s|__VPSDOMAIN__|${vps_domain}|g; s|__WEBROOT__|${webroot}|g; s|__CREDOPORT__|${credo_port}|g" "$vps_conf"
   reload_nginx
 fi
 
@@ -1541,9 +1525,9 @@ SSLEOF
 
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     echo "  SSL requires root — running nginx/certbot step with sudo..."
-    sudo bash "$tmp" "$domain" "$vps_domain" "$email"
+    sudo bash "$tmp" "$domain" "$vps_domain" "$email" "$credo_port"
   else
-    bash "$tmp" "$domain" "$vps_domain" "$email"
+    bash "$tmp" "$domain" "$vps_domain" "$email" "$credo_port"
   fi
   rm -f "$tmp"
 }
@@ -1552,12 +1536,26 @@ run_ssl_setup() {
   # Keycloak SSL is managed by init-keycloak.sh — only handle the CREDEBL API/VPS domain.
   local vps_domain="$SSL_VPS_DOMAIN"
 
+  # Resolve Credo admin port from DB (stored in agentEndPoint as http://VPS:PORT)
+  local credo_port
+  credo_port=$(
+    docker compose exec -T postgres env PGPASSWORD="${POSTGRES_PASSWORD:-}" \
+      psql -U "${POSTGRES_USER:-credebl}" -d "${POSTGRES_DB:-credebl}" -Atqc "
+        SELECT COALESCE(oa.\"agentEndPoint\", '')
+        FROM organisation o
+        LEFT JOIN org_agents oa ON oa.\"orgId\" = o.id
+        WHERE o.name = 'Platform-admin'
+        LIMIT 1;
+      " 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+$'
+  ) || true
+  credo_port="${credo_port:-8001}"
+
   echo
-  echo "Setting up HTTPS for CREDEBL API: ${vps_domain}"
+  echo "Setting up HTTPS for CREDEBL API: ${vps_domain} (Credo port: ${credo_port})"
 
   # Step 1 — nginx + certbot for VPS domain (needs root, runs via sudo temp script)
   # Pass empty string as domain arg so the Keycloak nginx block is skipped.
-  ssl_nginx_certbot "" "$vps_domain" "$PLATFORM_ADMIN_EMAIL"
+  ssl_nginx_certbot "" "$vps_domain" "$PLATFORM_ADMIN_EMAIL" "$credo_port"
 
   # Step 2 — update .env with HTTPS URLs (Keycloak URL is unchanged — external)
   ssl_update_env "$vps_domain"
