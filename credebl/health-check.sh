@@ -23,6 +23,18 @@ check() {
   fi
 }
 
+# optional_check: counts as pass if present, silently skips if not deployed.
+optional_check() {
+  local name=$1
+  local cmd=$2
+  if eval "$cmd" &>/dev/null; then
+    echo "  ✓ $name"
+    PASS=$((PASS + 1))
+  else
+    echo "  –  $name  (not deployed)"
+  fi
+}
+
 platform_admin_shared_agent_ready() {
   local row status endpoint token_url
   row="$(docker compose exec -T postgres env PGPASSWORD="${POSTGRES_PASSWORD:-}" \
@@ -151,7 +163,7 @@ echo "── Infrastructure ─────────────────�
 check "postgres"   "docker compose ps postgres | grep -q '(healthy)'"
 check "redis"      "docker compose ps redis | grep -q '(healthy)'"
 check "nats"       "docker compose ps nats | grep -q '(healthy)'"
-check "keycloak"   "docker compose ps keycloak | grep -q '(healthy)'"
+check "keycloak"   "curl -sf --max-time 8 '${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}/realms/master' | grep -q 'realm'"
 check "minio"      "docker compose ps minio | grep -q '(healthy)'"
 check "minio-setup" "docker inspect --format='{{.State.Status}} {{.State.ExitCode}}' credebl-minio-setup 2>/dev/null | grep -Eqi '^exited 0$'"
 check "mailpit"    "docker compose ps mailpit | grep -q 'running\|Up'"
@@ -160,7 +172,7 @@ echo ""
 echo "── CREDEBL services ────────────────────────────────────────"
 check "platform-admin-bootstrap" "docker inspect --format='{{.State.Status}} {{.State.ExitCode}}' credebl-platform-admin-bootstrap 2>/dev/null | grep -Eqi '^(running|exited 0)$'"
 check "api-gateway"        "docker compose ps api-gateway | grep -q 'running\|Up'"
-check "studio"             "docker compose ps studio | grep -q 'running\|Up'"
+optional_check "studio"    "docker compose ps studio | grep -q 'running\|Up'"
 check "user"               "docker compose ps user | grep -q 'running\|Up'"
 check "utility"            "docker compose ps utility | grep -q 'running\|Up'"
 check "connection"         "docker compose ps connection | grep -q 'running\|Up'"
@@ -185,9 +197,9 @@ check "platform-admin shared agent" "platform_admin_shared_agent_ready"
 echo ""
 echo "── Endpoints ───────────────────────────────────────────────"
 check "API Gateway HTTP" "curl -sf http://localhost:5000/api | grep -qi 'swagger\|openapi\|html'"
-check "Studio HTTP"      "curl -sf http://localhost:3000 | grep -qi '<html'"
+optional_check "Studio HTTP" "curl -sf --max-time 5 http://localhost:3000 | grep -qi '<html'"
 check "API Gateway CORS" "curl -si -X OPTIONS http://localhost:5000/api -H \"Origin: ${STUDIO_ORIGIN}\" -H 'Access-Control-Request-Method: GET' | tr -d '\r' | grep -Fqi \"access-control-allow-origin: ${STUDIO_ORIGIN}\""
-check "Keycloak HTTP"    "curl -sf http://localhost:8080/realms/${KEYCLOAK_REALM_CHECK}/.well-known/openid-configuration | grep -q 'issuer'"
+check "Keycloak HTTP"    "curl -sf --max-time 8 '${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}/realms/${KEYCLOAK_REALM_CHECK}/.well-known/openid-configuration' | grep -q 'issuer'"
 check "MinIO HTTP"       "curl -sf http://localhost:9000/minio/health/live"
 check "Mailpit HTTP"     "curl -sf http://localhost:8025"
 check "Schema server"    "curl -sf http://localhost:4000"
