@@ -496,6 +496,35 @@ JSEOF
   docker exec --user root credebl-issuance node /tmp/patch_issuance_qr.js
 }
 
+patch_issuance_qr_deeplink() {
+  # Patch 12 — Issuance service QR code encodes the raw MinIO path (/default/uuid)
+  # instead of the full deeplink URL (DEEPLINK_DOMAIN/default/uuid).
+  # Root cause: the variable deepLinkURL is computed right before QR generation via
+  #   convertUrlToDeepLinkUrl(shortenUrl)
+  # but QRCode.toDataURL is called with shortenUrl (the raw path) instead of deepLinkURL.
+  # As a result, the QR in the email contains only /default/<uuid>, which wallet apps
+  # cannot resolve. The text link in the email body is correct because emailHtml
+  # already uses deepLinkURL.
+  # Fix: replace QRCode.toDataURL(shortenUrl, ...) with QRCode.toDataURL(deepLinkURL, ...).
+  local patch_script
+  patch_script="$(mktemp /tmp/patch_issuance_qrl_XXXXXX.js)"
+  cat > "$patch_script" << 'JSEOF'
+const fs = require('fs');
+const path = '/app/dist/apps/issuance/main.js';
+let content = fs.readFileSync(path, 'utf8');
+if (content.includes('PATCH12: qr uses deepLinkURL')) { process.stdout.write('already patched\n'); process.exit(0); }
+const old = 'const outOfBandIssuanceQrCode = await QRCode.toDataURL(shortenUrl, qrCodeOptions);';
+const nw  = 'const outOfBandIssuanceQrCode = await QRCode.toDataURL(deepLinkURL, qrCodeOptions); /*PATCH12: qr uses deepLinkURL*/';
+if (!content.includes(old)) { process.stderr.write('ERROR: QR deeplink pattern not found\n'); process.exit(1); }
+content = content.replace(old, nw);
+fs.writeFileSync(path, content);
+process.stdout.write('patched\n');
+JSEOF
+  docker cp "$patch_script" credebl-issuance:/tmp/patch_issuance_qrl.js
+  rm -f "$patch_script"
+  docker exec --user root credebl-issuance node /tmp/patch_issuance_qrl.js
+}
+
 patch_verification_qr_encoding() {
   # Patch 11 — Verification service QR code attachment is corrupted binary.
   # Same root cause as Patch 10 (issuance): content is raw base64 text but
@@ -640,6 +669,8 @@ apply_container_patches() {
   patch_issuance_oob_credential_save
   echo -n "  Issuance service QR code attachment encoding: "
   patch_issuance_qr_encoding
+  echo -n "  Issuance service QR uses full deeplink URL: "
+  patch_issuance_qr_deeplink
   docker compose restart issuance >/dev/null
 
   echo -n "  Verification service QR code attachment encoding: "
@@ -1583,6 +1614,8 @@ run_ssl_setup() {
   patch_issuance_oob_credential_save
   echo -n "  Issuance QR code attachment encoding: "
   patch_issuance_qr_encoding
+  echo -n "  Issuance QR uses full deeplink URL: "
+  patch_issuance_qr_deeplink
   docker compose restart issuance >/dev/null
 
   echo -n "  Agent-service create-tenant JWT: "
@@ -1642,6 +1675,7 @@ if [ "${1:-}" = "--repatch-issuance" ]; then
   echo -n "  Patch 5 (@context triple-prefix): "; patch_issuance_context_urls
   echo -n "  Patch 9B (OOB credential upsert): "; patch_issuance_oob_credential_save
   echo -n "  Patch 10 (QR encoding): "; patch_issuance_qr_encoding
+  echo -n "  Patch 12 (QR deeplink URL): "; patch_issuance_qr_deeplink
   docker compose restart issuance >/dev/null
   echo "  Done. Issuance container restarted."
   exit 0
