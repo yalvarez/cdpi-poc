@@ -105,8 +105,8 @@ agent_provisioning_runtime_ok() {
 agent_runtime_file_ok() {
   docker compose exec -T agent-provisioning sh -ec '
     [ -f /app/agent.env ] &&
-    grep -q "^AGENT_HTTP_URL=http://" /app/agent.env &&
-    grep -q "^AGENT_WS_URL=ws://" /app/agent.env &&
+    grep -qE "^AGENT_HTTP_URL=https?://" /app/agent.env &&
+    grep -qE "^AGENT_WS_URL=wss?://" /app/agent.env &&
     grep -q "^CONNECT_TIMEOUT=[0-9][0-9]*$" /app/agent.env &&
     grep -q "^MAX_CONNECTIONS=[0-9][0-9]*$" /app/agent.env &&
     grep -q "^IDLE_TIMEOUT=[0-9][0-9]*$" /app/agent.env &&
