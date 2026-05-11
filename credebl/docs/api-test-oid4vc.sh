@@ -94,6 +94,101 @@ check_status() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# send_oid4vc_email <to> <subject> <url> <pin>
+#   Generates a QR code for <url> and sends an HTML email via Brevo SMTP.
+#   Reads SMTP_HOST/PORT/USER/PASS and EMAIL_FROM from the environment.
+#   pin may be empty (for proof-request emails).
+#   Installs qrencode on first call if not present.
+# ---------------------------------------------------------------------------
+send_oid4vc_email() {
+  local to="$1" subject="$2" url="$3" pin="${4:-}"
+
+  # Install qrencode if absent (Ubuntu/Debian, runs as root on the VPS)
+  if ! command -v qrencode >/dev/null 2>&1; then
+    echo "    (installing qrencode...)"
+    apt-get install -y -q qrencode >/dev/null 2>&1 || {
+      echo "    WARNING: qrencode not available — skipping email" >&2
+      return 0
+    }
+  fi
+
+  local qr_file
+  qr_file="$(mktemp /tmp/oid4vc_qr_XXXXXX.png)"
+  qrencode -o "$qr_file" -s 8 -m 3 "$url"
+
+  local pin_block=""
+  if [ -n "$pin" ]; then
+    pin_block="<p style='font-size:18px;margin:16px 0'><b>PIN:</b> <code style='font-size:22px;letter-spacing:4px;background:#f4f4f4;padding:4px 10px;border-radius:4px'>$pin</code></p>"
+  fi
+
+  local py_script
+  py_script="$(mktemp /tmp/send_offer_XXXXXX.py)"
+  cat > "$py_script" << PYEOF
+import smtplib, ssl, os, sys, base64
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
+
+smtp_host = os.environ.get('SMTP_HOST', 'smtp-relay.brevo.com')
+smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+smtp_user = os.environ.get('SMTP_USER', '')
+smtp_pass = os.environ.get('SMTP_PASS', '')
+email_from = os.environ.get('EMAIL_FROM', smtp_user)
+
+to_addr   = sys.argv[1]
+subject   = sys.argv[2]
+url       = sys.argv[3]
+pin_block = sys.argv[4]
+qr_path   = sys.argv[5]
+
+msg = MIMEMultipart('related')
+msg['Subject'] = subject
+msg['From']    = email_from
+msg['To']      = to_addr
+
+html = f"""
+<html><body style="font-family:sans-serif;max-width:540px;margin:0 auto;padding:24px">
+  <h2 style="color:#2d5be3">CDPI PoC — {subject}</h2>
+  <p>Escanea el QR con tu wallet OID4VCI o copia el URL de oferta:</p>
+  <p style="text-align:center"><img src="cid:qrcode" alt="QR code" style="width:220px;height:220px"></p>
+  {pin_block}
+  <p style="word-break:break-all;font-size:12px;color:#555;background:#f9f9f9;padding:10px;border-radius:6px">{url}</p>
+  <hr style="margin-top:32px;border:none;border-top:1px solid #eee">
+  <p style="font-size:11px;color:#aaa">CDPI Centre for Digital Public Infrastructure — PoC</p>
+</body></html>
+"""
+
+alt = MIMEMultipart('alternative')
+alt.attach(MIMEText(url, 'plain'))
+alt.attach(MIMEText(html, 'html'))
+msg.attach(alt)
+
+with open(qr_path, 'rb') as f:
+    img = MIMEImage(f.read(), _subtype='png')
+    img.add_header('Content-ID', '<qrcode>')
+    img.add_header('Content-Disposition', 'inline', filename='qr.png')
+    msg.attach(img)
+
+with smtplib.SMTP(smtp_host, smtp_port) as s:
+    s.ehlo()
+    s.starttls()
+    s.login(smtp_user, smtp_pass)
+    s.sendmail(email_from, to_addr, msg.as_string())
+
+print('sent')
+PYEOF
+
+  local result
+  result="$(python3 "$py_script" "$to" "$subject" "$url" "$pin_block" "$qr_file" 2>&1)"
+  rm -f "$py_script" "$qr_file"
+  if [ "$result" = "sent" ]; then
+    echo "    Email enviado a $to"
+  else
+    echo "    WARNING: email no enviado: $result" >&2
+  fi
+}
+
 # Encrypts a plain-text password using CryptoJS-compatible AES (OpenSSL salted MD5).
 # CREDEBL's /v1/auth/signin requires the password to be encrypted this way.
 encrypt_password() {
@@ -397,6 +492,9 @@ if [ -n "$OFFER_URL" ]; then
   echo ""
   echo "    Public OID4VCI metadata:"
   echo "    ${BASE_URL}/oid4vci/${ISSUER_SLUG}/.well-known/openid-credential-issuer"
+  echo ""
+  echo "    Enviando email con QR a ${EMAIL_TO}..."
+  send_oid4vc_email "$EMAIL_TO" "OID4VCI Credential Offer — CDPI PoC" "$OFFER_URL" "$OFFER_PIN" || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -474,6 +572,9 @@ if [ "$PROOF_STATUS" = "201" ]; then
     echo "    │ $PROOF_URL"
     echo "    └────────────────────────────────────────────────────────────┘"
     echo "    Holder scans this URL in their wallet to present the SD-JWT VC."
+    echo ""
+    echo "    Enviando email con QR a ${EMAIL_TO}..."
+    send_oid4vc_email "$EMAIL_TO" "OID4VP Proof Request — CDPI PoC" "$PROOF_URL" "" || true
   fi
 fi
 
