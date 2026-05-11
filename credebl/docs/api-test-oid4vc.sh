@@ -592,52 +592,54 @@ VERIFIER_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/verifier
 VERIFIER_STATUS="$(echo "$VERIFIER_RESPONSE" | jq -r '.statusCode // empty')"
 check_status "OID4VP verifier registered" "$VERIFIER_STATUS" "201"
 
-PROOF_ID=""
+SESSION_ID=""
 VERIFIER_DB_ID="$(echo "$VERIFIER_RESPONSE" | jq -r '.data.id // empty')"
 if [ -z "$VERIFIER_DB_ID" ]; then
   fail "Verifier DB ID extraction" "$(echo "$VERIFIER_RESPONSE" | jq -c .)"
 else
   echo "    Verifier DB ID: $VERIFIER_DB_ID"
 
-  # 9b — Create OID4VP presentation request.
-  # The input_descriptor's vct filter ensures only credentials with this exact schema
-  # can satisfy the request — wallets that don't hold a matching SD-JWT VC will reject it.
-  # responseMode "direct_post" is the most widely supported by SD-JWT VC wallets.
+  # 9b — Create OID4VP authorization request using DCQL query.
+  # Notes on the API:
+  #   - verifierId is a QUERY PARAMETER, not part of the request body
+  #   - Use dcql.query.credentials (not presentationExchange — PEX not yet supported in Credo)
+  #   - DCQL format key for SD-JWT VC is "dc+sd-jwt"
+  #   - meta.vct_values filters by credential type (matches the schemaLedgerId stored as vct)
+  # Response key for the openid4vp:// URL is data.authorizationRequest (not authorizationRequestUri)
+  # Response key for polling is data.verificationSession.id (a Credo session UUID)
   PRESENT_PAYLOAD="$(jq -n \
-    --arg verifierId "$VERIFIER_DB_ID" \
-    --arg schemaId   "$SCHEMA_ID" \
+    --arg schemaId "$SCHEMA_ID" \
     '{
-      requestSigner: { verifierId: $verifierId },
+      requestSigner: { method: "DID" },
       responseMode: "direct_post",
-      presentationExchange: {
-        id: "employment-check-001",
-        input_descriptors: [
-          {
-            id:   "employment-descriptor",
-            name: "Employment Credential",
-            constraints: {
-              fields: [
-                {
-                  path:   ["$.vct"],
-                  filter: { type: "string", const: $schemaId }
-                },
-                { path: ["$.given_name"] },
-                { path: ["$.employment_status"] }
+      dcql: {
+        query: {
+          credentials: [
+            {
+              id:     "employment-credential",
+              format: "dc+sd-jwt",
+              meta:   { vct_values: [$schemaId] },
+              claims: [
+                { path: ["given_name"] },
+                { path: ["employment_status"] },
+                { path: ["employer_name"] }
               ]
             }
-          }
-        ]
+          ]
+        }
       }
     }')"
 
-  PRESENT_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/presentation" "${AUTH[@]}" -d "$PRESENT_PAYLOAD")"
+  PRESENT_RESPONSE="$(curl -sS -X POST \
+    "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/presentation?verifierId=$VERIFIER_DB_ID" \
+    "${AUTH[@]}" -d "$PRESENT_PAYLOAD")"
   PRESENT_STATUS="$(echo "$PRESENT_RESPONSE" | jq -r '.statusCode // empty')"
   check_status "OID4VP authorization request created" "$PRESENT_STATUS" "201"
 
-  PROOF_URL="$(echo "$PRESENT_RESPONSE" | jq -r '.data.authorizationRequestUri // empty')"
-  PROOF_ID="$(echo "$PRESENT_RESPONSE" | jq -r '.data.presentationId // empty')"
+  PROOF_URL="$(echo "$PRESENT_RESPONSE" | jq -r '.data.authorizationRequest // empty')"
+  SESSION_ID="$(echo "$PRESENT_RESPONSE" | jq -r '.data.verificationSession.id // empty')"
 
-  echo "    Proof ID: $PROOF_ID"
+  echo "    Session ID: $SESSION_ID"
   if [ -n "$PROOF_URL" ]; then
     echo ""
     echo "    ┌─ OID4VP Authorization Request ─────────────────────────────┐"
@@ -652,31 +654,33 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# STEP 10 — Poll proof state
+# STEP 10 — Poll OID4VP session state
 # ---------------------------------------------------------------------------
 echo ""
-if [ -n "$PROOF_ID" ]; then
-  echo "[10/10] Poll proof state (3 attempts — needs holder to present in wallet)"
+if [ -n "$SESSION_ID" ]; then
+  echo "[10/10] Poll OID4VP session state (3 attempts — needs holder to scan + present)"
+  # Poll GET /v1/orgs/{orgId}/oid4vp/verifier-presentation?id=<session-id>
+  # OID4VP state values: RequestCreated → RequestUriRetrieved → ResponseVerified | Error
   for i in 1 2 3; do
     sleep 5
-    STATE_RESPONSE="$(curl -sS "$BASE_URL/v1/orgs/$ORG_ID/proofs/$PROOF_ID" -H "Authorization: Bearer $TOKEN")"
-    PROOF_STATE="$(echo "$STATE_RESPONSE" | jq -r '.data.state // .state // "unknown"')"
-    echo "    Attempt $i — state: $PROOF_STATE"
-    if [ "$PROOF_STATE" = "done" ] || [ "$PROOF_STATE" = "verified" ]; then
-      IS_VERIFIED="$(echo "$STATE_RESPONSE" | jq -r '.data.isVerified // false')"
-      pass "Proof verified: isVerified=$IS_VERIFIED"
+    SESSION_RESPONSE="$(curl -sS \
+      "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/verifier-presentation?id=$SESSION_ID" \
+      -H "Authorization: Bearer $TOKEN")"
+    SESSION_STATE="$(echo "$SESSION_RESPONSE" | jq -r '.data.state // .state // "unknown"' 2>/dev/null)"
+    echo "    Attempt $i — state: $SESSION_STATE"
+    if [ "$SESSION_STATE" = "ResponseVerified" ]; then
+      pass "OID4VP presentation verified"
       break
-    elif [ "$PROOF_STATE" = "abandoned" ]; then
-      fail "Proof abandoned by holder" "state=abandoned"
+    elif [ "$SESSION_STATE" = "Error" ]; then
+      fail "OID4VP session error" "state=Error"
       break
     fi
   done
-  echo "    (Proof state polling done — if state is 'request-sent', the holder"
-  echo "     has not yet scanned the proof request URL. This is expected in"
-  echo "     automated tests without a live wallet.)"
+  echo "    (If state is 'RequestCreated', the holder has not yet scanned the QR."
+  echo "     This is expected in automated tests without a live OID4VP wallet.)"
   PASS=$((PASS + 1))
 else
-  echo "[10/10] Skipped — no proof ID (step 9 failed)"
+  echo "[10/10] Skipped — no session ID (step 9 failed)"
 fi
 
 # ---------------------------------------------------------------------------

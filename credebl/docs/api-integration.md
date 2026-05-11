@@ -549,67 +549,79 @@ Content-Type: application/json
 }
 ```
 
-### Step 2 — POST /v1/orgs/{orgId}/oid4vp/presentation — Create presentation request
+### Step 2 — POST /v1/orgs/{orgId}/oid4vp/presentation?verifierId= — Create presentation request
 
 Creates an OID4VP authorization request URL that the holder scans to present their SD-JWT VC.
 
+> **Important**: `verifierId` (the `data.id` UUID from Step 1) is a **query parameter**, not a body field.
+
 ```http
-POST /v1/orgs/{orgId}/oid4vp/presentation
+POST /v1/orgs/{orgId}/oid4vp/presentation?verifierId=<verifier-db-uuid>
 Authorization: Bearer <token>
 Content-Type: application/json
 
 {
   "requestSigner": {
-    "verifierId": "<verifier-db-uuid>"
+    "method": "DID"
   },
   "responseMode": "direct_post",
-  "presentationExchange": {
-    "id": "employment-check-001",
-    "input_descriptors": [
-      {
-        "id":      "employment-descriptor",
-        "name":    "Employment Credential",
-        "constraints": {
-          "fields": [
-            {
-              "path":   ["$.vct"],
-              "filter": {
-                "type":  "string",
-                "const": "http://schema-file-server:4000/schemas/<schema-uuid>"
-              }
-            },
-            { "path": ["$.employment_status"] }
+  "dcql": {
+    "query": {
+      "credentials": [
+        {
+          "id":     "employment-credential",
+          "format": "dc+sd-jwt",
+          "meta":   { "vct_values": ["http://schema-file-server:4000/schemas/<schema-uuid>"] },
+          "claims": [
+            { "path": ["given_name"] },
+            { "path": ["employment_status"] }
           ]
         }
-      }
-    ]
+      ]
+    }
   }
 }
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `requestSigner.verifierId` | Yes | DB UUID of the verifier registered in Step 1 |
-| `responseMode` | Yes | `"direct_post"` (most compatible) or `"direct_post.jwt"` |
-| `presentationExchange` | Yes* | PEX presentation definition (*mutually exclusive with `dcql`) |
-| `dcql` | Yes* | DCQL query (*mutually exclusive with `presentationExchange`) |
+| `?verifierId` (query param) | Yes | `data.id` UUID from the verifier registered in Step 1 |
+| `requestSigner.method` | Yes | `"DID"` for did:key orgs |
+| `responseMode` | Yes | `"direct_post"` (most compatible) |
+| `dcql.query.credentials` | Yes | DCQL credential query (Presentation Exchange is not supported in this Credo version) |
+| `dcql.query.credentials[].format` | Yes | `"dc+sd-jwt"` for SD-JWT VC |
+| `dcql.query.credentials[].meta.vct_values` | Recommended | Array of schema URLs to filter by credential type |
 
 **Response**:
 ```json
 {
   "statusCode": 201,
   "data": {
-    "authorizationRequestUri": "openid4vp://?request_uri=https%3A%2F%2F<VPS_HOST>%2Foid4vp%2F...",
-    "presentationId":          "<presentation-uuid>"
+    "authorizationRequest": "openid4vp://?client_id=decentralized_identifier%3Adid%3Akey%3A...&request_uri=https%3A%2F%2F<VPS_HOST>%2Foid4vp%2F...",
+    "verificationSession": {
+      "id":    "<session-uuid>",
+      "state": "RequestCreated"
+    }
   }
 }
 ```
 
-Display `authorizationRequestUri` as a QR code or deep link. The holder scans it with their wallet to present the credential. Poll `GET /v1/orgs/{orgId}/proofs/{presentationId}` to check the result (same state machine as the DIDComm flow).
+Display `data.authorizationRequest` (the `openid4vp://` URL) as a QR code or deep link. The holder scans it to present their credential.
+
+### Step 3 — GET /v1/orgs/{orgId}/oid4vp/verifier-presentation?id= — Poll session state
+
+```http
+GET /v1/orgs/{orgId}/oid4vp/verifier-presentation?id=<session-uuid>
+Authorization: Bearer <token>
+```
+
+OID4VP state values: `RequestCreated` → `RequestUriRetrieved` → `ResponseVerified` | `Error`
+
+Poll until `state = "ResponseVerified"` to confirm the holder presented a valid credential.
 
 > **Which flow to use?**  
 > — `proofs/oob` (DIDComm OOB): more compatible with all CREDEBL wallet types, proven in PoC.  
-> — `oid4vp/presentation` (native OID4VP): cleaner protocol, no DIDComm overhead, better for SD-JWT VC wallets. Both endpoints return the same proof state via `GET /v1/orgs/{orgId}/proofs/{presentationId}`.
+> — `oid4vp/presentation` (native OID4VP): cleaner protocol, proper `openid4vp://` URL, better for SD-JWT VC wallets.
 
 ---
 
