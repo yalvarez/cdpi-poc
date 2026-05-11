@@ -130,7 +130,7 @@ create_client_if_missing() {
     | json_find "clientId" "$client_id" "id") || existing_uuid=""
 
   if [ -n "$existing_uuid" ]; then
-    skip "Cliente '${client_id}' (id: ${existing_uuid})"
+    skip "Cliente '${client_id}' (id: ${existing_uuid})" >&2
     echo "$existing_uuid"
     return
   fi
@@ -139,7 +139,7 @@ create_client_if_missing() {
   local new_uuid
   new_uuid=$(kc_get "$TOKEN" "/admin/realms/${REALM}/clients?clientId=${client_id}" \
     | json_find "clientId" "$client_id" "id")
-  ok "${label} '${client_id}' creado (id: ${new_uuid})."
+  ok "${label} '${client_id}' creado (id: ${new_uuid})." >&2
   echo "$new_uuid"
 }
 
