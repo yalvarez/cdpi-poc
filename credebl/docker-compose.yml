@@ -251,7 +251,7 @@ services:
       - "${VPS_IP}:host-gateway"
       - "${KEYCLOAK_HOST}:host-gateway"
     volumes:
-      - ../scripts/bootstrap-platform-admin.sh:/work/bootstrap-platform-admin.sh:ro
+      - ./bootstrap-platform-admin.sh:/work/bootstrap-platform-admin.sh:ro
     depends_on:
       postgres:
         condition: service_healthy

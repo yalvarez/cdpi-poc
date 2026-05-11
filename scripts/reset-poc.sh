@@ -277,8 +277,9 @@ echo -e "${BOLD}${GREEN}║   Reset complete — environment is clean           
 echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo
 echo "  Ready for a fresh deployment:"
-$RESET_CREDEBL  && echo "    bash scripts/init-credebl.sh"
-$RESET_CREDEBL  && echo "    bash scripts/init-credebl-studio.sh"
 $RESET_KEYCLOAK && echo "    bash keycloak/init-keycloak.sh"
-$RESET_INJI     && echo "    bash scripts/init-inji.sh"
+$RESET_KEYCLOAK && echo "    bash keycloak/setup-credebl-realm.sh"
+$RESET_CREDEBL  && echo "    bash credebl/init-credebl.sh"
+$RESET_CREDEBL  && echo "    bash credebl/init-credebl-studio.sh   (optional)"
+$RESET_INJI     && echo "    bash inji/init-inji.sh"
 echo

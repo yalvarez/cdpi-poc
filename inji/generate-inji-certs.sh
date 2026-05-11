@@ -6,8 +6,8 @@
 # download flows via Inji Web.
 #
 # Run ONCE before first deployment:
-#   chmod +x scripts/generate-inji-certs.sh
-#   bash scripts/generate-inji-certs.sh
+#   chmod +x inji/generate-inji-certs.sh
+#   bash inji/generate-inji-certs.sh
 #
 # Output: inji/certs/oidckeystore.p12
 # =============================================================================

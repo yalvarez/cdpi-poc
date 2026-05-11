@@ -5,7 +5,7 @@ set -euo pipefail
 # Flow: encrypt password -> signin -> create org -> shared wallet -> DID -> W3C schema -> email issuance
 #
 # Usage:
-#   ADMIN_PASSWORD='changeme' bash scripts/credebl-api-e2e.sh <VPS_IP> [recipient_email]
+#   ADMIN_PASSWORD='changeme' bash credebl/credebl-api-e2e.sh <VPS_IP> [recipient_email]
 #
 # Optional env vars:
 #   BASE_URL=http://<VPS_IP>:5000
@@ -32,7 +32,7 @@ VPS_IP="${1:-}"
 EMAIL_TO="${2:-holder@example.com}"
 
 if [ -z "$VPS_IP" ]; then
-  echo "Usage: ADMIN_PASSWORD='changeme' bash scripts/credebl-api-e2e.sh <VPS_IP> [recipient_email]" >&2
+  echo "Usage: ADMIN_PASSWORD='changeme' bash credebl/credebl-api-e2e.sh <VPS_IP> [recipient_email]" >&2
   exit 1
 fi
 

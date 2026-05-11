@@ -20,14 +20,14 @@
 #   - jq, openssl, python3 available
 #
 # Usage:
-#   bash scripts/load-schemas.sh \
+#   bash credebl/load-schemas.sh \
 #     --org-id    <uuid> \
 #     --issuer-id <uuid> \
 #     [--schemas-dir credebl/schemas/] \
 #     [--env         credebl/.env]
 #
 # Example:
-#   bash scripts/load-schemas.sh \
+#   bash credebl/load-schemas.sh \
 #     --org-id    "3fa85f64-5717-4562-b3fc-2c963f66afa6" \
 #     --issuer-id "7e3c9b12-4a2d-4f8e-b9c1-d5e6f7a8b9c0"
 # =============================================================================

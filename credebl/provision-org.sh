@@ -11,7 +11,7 @@
 #   - jq, openssl, python3 available
 #
 # Usage:
-#   bash scripts/provision-org.sh \
+#   bash credebl/provision-org.sh \
 #     --name    "Ministry of Labor" \
 #     --slug    "mintrabajo-employment" \
 #     [--description "Official employment credential issuer"] \
@@ -29,7 +29,7 @@
 #   ISSUER_ID=<uuid>
 #
 # Example (capture output for next step):
-#   eval $(bash scripts/provision-org.sh --name "Min. Trabajo" --slug "mintrabajo")
+#   eval $(bash credebl/provision-org.sh --name "Min. Trabajo" --slug "mintrabajo")
 #   bash scripts/load-schemas.sh --org-id "$ORG_ID" --issuer-id "$ISSUER_ID"
 # =============================================================================
 

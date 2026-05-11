@@ -5,7 +5,7 @@
 # credebl-master-table.json) NO se borran — son archivos git tracked y se restauran
 # a su estado correcto con `git checkout`.
 #
-# Uso: bash scripts/reset-credebl-poc.sh
+# Uso: bash credebl/reset.sh
 
 set -e
 
@@ -56,4 +56,4 @@ rm -f /tmp/credebl-e2e.log
 
 echo
 echo "[DONE] Servidor limpio. Siguiente paso:"
-echo "  bash scripts/init-credebl.sh"
+echo "  bash credebl/init-credebl.sh"

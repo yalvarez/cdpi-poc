@@ -2,7 +2,7 @@
 # =============================================================================
 # CDPI PoC — Health Check Script
 # Run after deployment to verify all services are up
-# Usage: bash scripts/health-check.sh
+# Usage: bash credebl/health-check.sh
 # =============================================================================
 
 set -euo pipefail

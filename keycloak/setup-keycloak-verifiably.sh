@@ -8,7 +8,7 @@
 # Safe to re-run: skips creation if the realm/client/user already exists.
 #
 # Usage:
-#   bash scripts/setup-keycloak-verifiably.sh [KEYCLOAK_URL] [ADMIN_PASSWORD]
+#   bash keycloak/setup-keycloak-verifiably.sh [KEYCLOAK_URL] [ADMIN_PASSWORD]
 #
 # Defaults:
 #   KEYCLOAK_URL      http://localhost:8080   (or set KC_URL env var)
@@ -265,4 +265,4 @@ echo "    ${KC_URL}/realms/${REALM}/.well-known/openid-configuration"
 echo
 echo "  Test users: holder / issuer / admin  (password = username)"
 echo
-echo "  To re-run: bash scripts/setup-keycloak-verifiably.sh"
+echo "  To re-run: bash keycloak/setup-keycloak-verifiably.sh"

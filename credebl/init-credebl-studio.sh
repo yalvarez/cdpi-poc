@@ -7,7 +7,7 @@
 # Keycloak stack (keycloak/) must be reachable.
 #
 # Usage:
-#   bash scripts/init-credebl-studio.sh
+#   bash credebl/init-credebl-studio.sh
 #
 # What it does:
 #   1. Asks what URL Studio will be served on (default: STUDIO_URL from .env)

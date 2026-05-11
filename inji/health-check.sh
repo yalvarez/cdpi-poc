@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # CDPI PoC — INJI Stack Health Check
-# Usage: bash scripts/health-check-inji.sh
+# Usage: bash inji/health-check.sh
 # =============================================================================
 
 set -euo pipefail
@@ -76,7 +76,7 @@ else
   echo " Troubleshooting:"
   echo "   docker compose logs <service-name>   — show service logs"
   echo "   docker compose ps                    — show container states"
-  echo "   bash scripts/init-inji.sh            — re-run initialiser"
+  echo "   bash inji/init-inji.sh            — re-run initialiser"
   exit 1
 fi
 echo "============================================================"
