@@ -1552,6 +1552,11 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto https;
         proxy_buffering off; }
+    location /oob/ {
+        proxy_pass http://127.0.0.1:3011/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https; }
 }
 NGINX
   sed -i "s|__VPSDOMAIN__|${vps_domain}|g; s|__WEBROOT__|${webroot}|g; s|__CREDOPORT__|${credo_port}|g" "$vps_conf"
@@ -1899,11 +1904,16 @@ else
   SOCKET_HOST="http://${VPS_PUBLIC_HOST}:5000"
 fi
 ENABLE_CORS_IP_LIST="${STUDIO_URL},http://localhost:3000,http://127.0.0.1:3000"
-# DEEPLINK_DOMAIN: prepended to /default/{uuid} to build the Accept Credential link.
-# Points to MinIO so wallets can fetch the OOB invitation JSON stored there.
-# SHORTENED_URL_DOMAIN is set to empty — the utility service builds /default/{uuid}
-# which gets concatenated directly onto DEEPLINK_DOMAIN.
-DEEPLINK_DOMAIN="http://${VPS_HOST}:9000/credebl-bucket"
+# DEEPLINK_DOMAIN: prepended to /default/{uuid} to build the QR content for DIDComm OOB.
+# oob-redirector service (port 3011) receives GET /default/<uuid>, fetches the MinIO
+# object, and returns 302 to the actual OOB invitation URL. nginx proxies /oob/ → 3011.
+# On SSL deployments the QR encodes https://<domain>/oob/default/<uuid> — a short,
+# scannable URL that any DIDComm wallet can follow to get the OOB invitation.
+if [ -n "${VPS_PUBLIC_HOST:-}" ] && [ "${ENABLE_SSL:-false}" = "true" ]; then
+  DEEPLINK_DOMAIN="https://${VPS_PUBLIC_HOST}/oob"
+else
+  DEEPLINK_DOMAIN="http://${VPS_HOST}:9000/credebl-bucket"
+fi
 
 # =============================================================================
 # WRITE .env FROM TEMPLATE

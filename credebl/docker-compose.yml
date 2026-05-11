@@ -207,6 +207,44 @@ services:
         limits:
           memory: 256M
 
+  # ── OOB Redirector ──────────────────────────────────────────────────────────
+  # Resolves the DIDComm OOB QR problem: CREDEBL stores the OOB invitation URL
+  # in MinIO and puts the MinIO URL in the QR code. Mobile wallets can't use a
+  # MinIO URL directly. This service accepts GET /default/<uuid>, fetches the
+  # MinIO object (which contains the real OOB invitation URL as a JSON string),
+  # and returns a 302 redirect to that URL. nginx proxies /oob/ here.
+  # DEEPLINK_DOMAIN must be set to https://<domain>/oob in .env.
+  oob-redirector:
+    image: python:3.12-alpine
+    container_name: credebl-oob-redirector
+    restart: unless-stopped
+    command: >
+      python3 -c "
+      import http.server, urllib.request, json, os
+      MINIO='http://minio:9000/credebl-bucket'
+      class H(http.server.BaseHTTPRequestHandler):
+          def do_GET(self):
+              try:
+                  data=urllib.request.urlopen(MINIO+self.path).read()
+                  oob=json.loads(data)
+                  self.send_response(302)
+                  self.send_header('Location',oob)
+                  self.send_header('Access-Control-Allow-Origin','*')
+                  self.end_headers()
+              except Exception as e:
+                  self.send_error(502,str(e))
+          def log_message(self,f,*a): pass
+      http.server.HTTPServer(('',3011),H).serve_forever()
+      "
+    networks:
+      - credebl-net
+    depends_on:
+      - minio
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
   # ---------------------------------------------------------------------------
   # CREDEBL Platform services
   # ---------------------------------------------------------------------------
