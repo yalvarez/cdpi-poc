@@ -19,18 +19,30 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="$REPO_DIR/credebl/.env"
+KC_ENV_FILE="$SCRIPT_DIR/.env"          # standalone keycloak/.env (primary)
+CREDEBL_ENV_FILE="$REPO_DIR/credebl/.env"  # credebl/.env (fallback)
 
 # ---------------------------------------------------------------------------
 # Config — override via env vars or positional args
 # ---------------------------------------------------------------------------
-KC_URL="${1:-${KC_URL:-http://localhost:8080}}"
+
+# Resolve default KC URL: prefer KC_PUBLIC_URL from keycloak/.env (handles SSL domains)
+_KC_URL_DEFAULT="http://localhost:8080"
+if [ -f "$KC_ENV_FILE" ]; then
+  _from_kc_env="$(grep -E '^KC_PUBLIC_URL=' "$KC_ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  [ -n "$_from_kc_env" ] && _KC_URL_DEFAULT="$_from_kc_env"
+fi
+
+KC_URL="${1:-${KC_URL:-$_KC_URL_DEFAULT}}"
 KC_URL="${KC_URL%/}"  # strip trailing slash
 
-# Read admin password from .env if not provided
+# Read admin password — keycloak/.env first, then credebl/.env as fallback
 if [ -z "${KC_ADMIN_PASS:-}" ]; then
-  if [ -f "$ENV_FILE" ]; then
-    KC_ADMIN_PASS="$(grep -E '^KEYCLOAK_ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  if [ -f "$KC_ENV_FILE" ]; then
+    KC_ADMIN_PASS="$(grep -E '^KEYCLOAK_ADMIN_PASSWORD=' "$KC_ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  fi
+  if [ -z "${KC_ADMIN_PASS:-}" ] && [ -f "$CREDEBL_ENV_FILE" ]; then
+    KC_ADMIN_PASS="$(grep -E '^KEYCLOAK_ADMIN_PASSWORD=' "$CREDEBL_ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")"
   fi
 fi
 KC_ADMIN_PASS="${2:-${KC_ADMIN_PASS:-}}"
