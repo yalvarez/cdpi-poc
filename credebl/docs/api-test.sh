@@ -35,7 +35,12 @@ ask_if_missing "ADMIN_PASSWORD" "Password admin"
 ask_if_missing "CRYPTO_PRIVATE_KEY" "Crypto private key"
 ask_if_missing "EMAIL_TO" "Email destino para emisión VC"
 
-BASE_URL="http://$VPS_IP:5000"
+# Use HTTPS if VPS_IP looks like a domain name (has dots but not a bare IP)
+if [[ "$VPS_IP" =~ \. ]] && [[ ! "$VPS_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  BASE_URL="https://$VPS_IP"
+else
+  BASE_URL="http://$VPS_IP:5000"
+fi
 SCHEMA_FILE_SERVER_URL="${SCHEMA_FILE_SERVER_URL:-http://schema-file-server:4000/schemas/}"
 
 REQUEST_ID="$(date +%s)"
