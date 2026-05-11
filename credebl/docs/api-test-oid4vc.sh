@@ -490,13 +490,13 @@ TEMPLATE_PAYLOAD="$(jq -n \
     template: {
       vct: $schemaId,
       attributes: [
-        {key:"given_name",            value_type:"string"},
-        {key:"family_name",           value_type:"string"},
-        {key:"document_number",       value_type:"string"},
-        {key:"employer_name",         value_type:"string"},
-        {key:"employment_status",     value_type:"string"},
-        {key:"position_title",        value_type:"string"},
-        {key:"employment_start_date", value_type:"string"}
+        {key:"given_name",            value_type:"string", disclose:false},
+        {key:"employer_name",         value_type:"string", disclose:false},
+        {key:"employment_status",     value_type:"string", disclose:false},
+        {key:"family_name",           value_type:"string", disclose:true},
+        {key:"document_number",       value_type:"string", disclose:true},
+        {key:"position_title",        value_type:"string", disclose:true},
+        {key:"employment_start_date", value_type:"string", disclose:true}
       ]
     }
   }')"
@@ -670,10 +670,11 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "[11/11] OID4VP — solicitud PARCIAL (Selective Disclosure: 3/7 campos)"
-# El DCQL claims[] solo lista 3 atributos.
-# La wallet solo revela esos 3 — los 4 restantes quedan como hashes en el SD-JWT.
+# Los 3 campos pedidos son los "always revealed" (disclose:false en el template).
+# Los 4 campos SD (family_name, document_number, position_title, employment_start_date)
+# están hasheados en _sd[] — la wallet no incluye sus disclosure tokens.
 # El verifier SOLO RECIBE given_name, employment_status, employer_name.
-# Útil para "¿está empleado?" sin revelar salario, RUT, ni fecha de inicio.
+# Útil para "¿está empleado?" sin revelar RUT, apellido ni fecha de inicio.
 SESSION_ID_PARTIAL=""
 PRESENT_PARTIAL_PAYLOAD="$(jq -n \
   --arg schemaId "$SCHEMA_ID" \
