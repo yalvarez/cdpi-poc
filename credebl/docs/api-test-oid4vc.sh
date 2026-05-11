@@ -16,9 +16,10 @@
 #     7. Create OID4VCI issuer + credential template
 #     8. Create credential offer → display openid-credential-offer:// URL + PIN
 #
-#   Steps 9-10 (Verification — native OID4VP):
-#     9. Register OID4VP verifier + create authorization request (openid4vp://)
-#    10. Poll proof state
+#   Steps 9-11 (Verification — native OID4VP con Selective Disclosure):
+#     9. Register OID4VP verifier
+#    10. Solicitud COMPLETA — pide los 7 campos, envía QR por email, poll
+#    11. Solicitud PARCIAL  — pide solo 3/7 campos (SD demo), envía QR por email, poll
 #
 # Usage:
 #   bash credebl/docs/api-test-oid4vc.sh
@@ -27,7 +28,7 @@
 #   VPS_IP, ADMIN_EMAIL, ADMIN_PASSWORD, CRYPTO_PRIVATE_KEY, EMAIL_TO
 #
 # Prerequisites (SSL deployment only):
-#   - nginx must proxy /oid4vci/ → Credo admin port 8001 (added by init-credebl.sh)
+#   - nginx must proxy /oid4vci/ and /oid4vp/ → Credo admin port 8001
 #   - AGENT_HTTP_URL in agent.env must be https:// (set by init-credebl.sh when SSL enabled)
 #   - Credo OID4VCI spec requires credential_issuer to be an https:// URL
 # =============================================================================
@@ -279,7 +280,7 @@ echo ""
 # ---------------------------------------------------------------------------
 # STEP 1 — Encrypt admin password
 # ---------------------------------------------------------------------------
-echo "[1/10] Encrypt admin password"
+echo "[1/11] Encrypt admin password"
 ENC_PASSWORD="$(encrypt_password "$ADMIN_PASSWORD")"
 if [ -z "$ENC_PASSWORD" ]; then
   echo "ERROR: Password encryption failed. Check CRYPTO_PRIVATE_KEY." >&2
@@ -291,7 +292,7 @@ pass "Password encrypted"
 # STEP 2 — Sign in
 # ---------------------------------------------------------------------------
 echo ""
-echo "[2/10] Sign in as platform admin"
+echo "[2/11] Sign in as platform admin"
 SIGNIN_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/auth/signin" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ENC_PASSWORD\"}")"
@@ -310,7 +311,7 @@ AUTH=(-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json")
 # STEP 3 — Create organization
 # ---------------------------------------------------------------------------
 echo ""
-echo "[3/10] Create organization: $ORG_NAME"
+echo "[3/11] Create organization: $ORG_NAME"
 CREATE_ORG_PAYLOAD="$(jq -n \
   --arg name "$ORG_NAME" \
   '{name:$name, description:"OID4VC test org", website:"https://cdpi-poc.local",
@@ -329,7 +330,7 @@ pass "Org created: $ORG_ID"
 # STEP 4 — Spin up shared wallet
 # ---------------------------------------------------------------------------
 echo ""
-echo "[4/10] Spin up shared wallet"
+echo "[4/11] Spin up shared wallet"
 WALLET_PAYLOAD="$(jq -n --arg label "OID4VCWallet$REQUEST_ID" '{label:$label, clientSocketId:""}')"
 WALLET_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/agents/wallet" "${AUTH[@]}" -d "$WALLET_PAYLOAD")"
 WALLET_STATUS="$(echo "$WALLET_RESPONSE" | jq -r '.statusCode // empty')"
@@ -344,7 +345,7 @@ fi
 # STEP 5 — Create DID (did:key — required for OID4VCI SD-JWT)
 # ---------------------------------------------------------------------------
 echo ""
-echo "[5/10] Create DID (did:key)"
+echo "[5/11] Create DID (did:key)"
 # did:key is the only DID method that works for OID4VCI SD-JWT in CREDEBL.
 # did:indy is ledger-bound and produces AnonCreds; did:polygon produces JSON-LD.
 DID_SEED="$(openssl rand -hex 16)"
@@ -376,7 +377,7 @@ pass "Org DID: $ORG_DID"
 # STEP 6 — Create SD-JWT VC schema (schemaType=no_ledger)
 # ---------------------------------------------------------------------------
 echo ""
-echo "[6/10] Create SD-JWT VC schema: $SCHEMA_NAME"
+echo "[6/11] Create SD-JWT VC schema: $SCHEMA_NAME"
 # For OID4VCI SD-JWT:
 #   - type: "json"          → instructs CREDEBL to store schema in schema-file-server
 #   - schemaType: "no_ledger" → not anchored to any blockchain ledger
@@ -420,7 +421,7 @@ echo "    Schema ID: $SCHEMA_ID"
 # STEP 7 — Create OID4VCI issuer + credential template
 # ---------------------------------------------------------------------------
 echo ""
-echo "[7/10] Create OID4VCI issuer + credential template"
+echo "[7/11] Create OID4VCI issuer + credential template"
 
 # 7a — Create the OID4VCI issuer (maps org + did:key → an OID4VCI credential_issuer endpoint)
 #
@@ -517,7 +518,7 @@ echo "    Template ID: $TEMPLATE_ID"
 # STEP 8 — Create credential offer (pre-authorized code flow with PIN)
 # ---------------------------------------------------------------------------
 echo ""
-echo "[8/10] Create OID4VCI credential offer (pre-authorized code, PIN-protected)"
+echo "[8/11] Create OID4VCI credential offer (pre-authorized code, PIN-protected)"
 
 # The offer payload wraps credential data inside credentials[].payload.
 # authorizationType: "preAuthorizedCodeFlow" for pre-auth code flow.
@@ -559,8 +560,8 @@ if [ -n "$OFFER_URL" ]; then
   echo "    ├────────────────────────────────────────────────────────────────┤"
   echo "    │ PIN: $OFFER_PIN"
   echo "    └────────────────────────────────────────────────────────────────┘"
-  echo "    Holder opens this URL in an OID4VCI wallet (e.g. Inji, MATTR)"
-  echo "    and enters the PIN when prompted to receive the SD-JWT VC."
+  echo "    Holder abre este URL en una wallet OID4VCI (ej. Inji, MATTR)"
+  echo "    e ingresa el PIN cuando se lo solicita para recibir el SD-JWT VC."
   echo ""
   echo "    Public OID4VCI metadata:"
   echo "    ${BASE_URL}/oid4vci/${ISSUER_SLUG}/.well-known/openid-credential-issuer"
@@ -570,12 +571,14 @@ if [ -n "$OFFER_URL" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# STEP 9 — Native OID4VP verification (register verifier + create authorization request)
+# STEP 9 — Registrar OID4VP verifier (una vez — se reutiliza en steps 10 y 11)
 # ---------------------------------------------------------------------------
 echo ""
-echo "[9/10] Native OID4VP: register verifier + create authorization request"
-# 9a — Register an OID4VP verifier (once per deployment, analogous to creating an OID4VCI issuer).
-# The verifierId slug is embedded in all subsequent OID4VP endpoints for this verifier.
+echo "[9/11] Registrar OID4VP verifier"
+# Un verifier equivale a una "aplicación verificadora" (ej. el HR Portal).
+# Se registra una vez y se reutiliza para múltiples solicitudes de presentación.
+# verifierId: slug que aparece en todos los endpoints OID4VP de este verifier.
+# logo_uri es requerido en clientMetadata — usar cualquier URL válida.
 VERIFIER_SLUG="cdpi-poc-hr-verifier-${REQUEST_ID}"
 VERIFIER_PAYLOAD="$(jq -n \
   --arg verifierId "$VERIFIER_SLUG" \
@@ -590,98 +593,173 @@ VERIFIER_PAYLOAD="$(jq -n \
 
 VERIFIER_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/verifier" "${AUTH[@]}" -d "$VERIFIER_PAYLOAD")"
 VERIFIER_STATUS="$(echo "$VERIFIER_RESPONSE" | jq -r '.statusCode // empty')"
-check_status "OID4VP verifier registered" "$VERIFIER_STATUS" "201"
+check_status "OID4VP verifier registrado" "$VERIFIER_STATUS" "201"
 
-SESSION_ID=""
 VERIFIER_DB_ID="$(echo "$VERIFIER_RESPONSE" | jq -r '.data.id // empty')"
 if [ -z "$VERIFIER_DB_ID" ]; then
   fail "Verifier DB ID extraction" "$(echo "$VERIFIER_RESPONSE" | jq -c .)"
-else
+  echo "  Skipping steps 10-11 (no verifier ID)"
+  VERIFIER_DB_ID=""
+fi
+
+if [ -n "$VERIFIER_DB_ID" ]; then
   echo "    Verifier DB ID: $VERIFIER_DB_ID"
+  echo "    Verifier slug:  $VERIFIER_SLUG"
 
-  # 9b — Create OID4VP authorization request using DCQL query.
-  # Notes on the API:
-  #   - verifierId is a QUERY PARAMETER, not part of the request body
-  #   - Use dcql.query.credentials (not presentationExchange — PEX not yet supported in Credo)
-  #   - DCQL format key for SD-JWT VC is "dc+sd-jwt"
-  #   - meta.vct_values filters by credential type (matches the schemaLedgerId stored as vct)
-  # Response key for the openid4vp:// URL is data.authorizationRequest (not authorizationRequestUri)
-  # Response key for polling is data.verificationSession.id (a Credo session UUID)
-  PRESENT_PAYLOAD="$(jq -n \
-    --arg schemaId "$SCHEMA_ID" \
-    '{
-      requestSigner: { method: "DID" },
-      responseMode: "direct_post",
-      dcql: {
-        query: {
-          credentials: [
-            {
-              id:     "employment-credential",
-              format: "dc+sd-jwt",
-              meta:   { vct_values: [$schemaId] },
-              claims: [
-                { path: ["given_name"] },
-                { path: ["employment_status"] },
-                { path: ["employer_name"] }
-              ]
-            }
-          ]
-        }
+# ---------------------------------------------------------------------------
+# STEP 10 — OID4VP: solicitud COMPLETA (todos los campos)
+# ---------------------------------------------------------------------------
+echo ""
+echo "[10/11] OID4VP — solicitud COMPLETA (7/7 campos)"
+# El DCQL claims[] lista todos los atributos del esquema.
+# El holder debe revelar todos — no hay ocultamiento selectivo.
+# Útil para casos como verificación de empleo completa o onboarding KYC.
+SESSION_ID_FULL=""
+PRESENT_FULL_PAYLOAD="$(jq -n \
+  --arg schemaId "$SCHEMA_ID" \
+  '{
+    requestSigner: { method: "DID" },
+    responseMode: "direct_post",
+    dcql: {
+      query: {
+        credentials: [
+          {
+            id:     "employment-full",
+            format: "dc+sd-jwt",
+            meta:   { vct_values: [$schemaId] },
+            claims: [
+              { path: ["given_name"] },
+              { path: ["family_name"] },
+              { path: ["document_number"] },
+              { path: ["employer_name"] },
+              { path: ["employment_status"] },
+              { path: ["position_title"] },
+              { path: ["employment_start_date"] }
+            ]
+          }
+        ]
       }
-    }')"
+    }
+  }')"
 
-  PRESENT_RESPONSE="$(curl -sS -X POST \
-    "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/presentation?verifierId=$VERIFIER_DB_ID" \
-    "${AUTH[@]}" -d "$PRESENT_PAYLOAD")"
-  PRESENT_STATUS="$(echo "$PRESENT_RESPONSE" | jq -r '.statusCode // empty')"
-  check_status "OID4VP authorization request created" "$PRESENT_STATUS" "201"
+PRESENT_FULL_RESPONSE="$(curl -sS -X POST \
+  "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/presentation?verifierId=$VERIFIER_DB_ID" \
+  "${AUTH[@]}" -d "$PRESENT_FULL_PAYLOAD")"
+PRESENT_FULL_STATUS="$(echo "$PRESENT_FULL_RESPONSE" | jq -r '.statusCode // empty')"
+check_status "Solicitud completa creada" "$PRESENT_FULL_STATUS" "201"
 
-  PROOF_URL="$(echo "$PRESENT_RESPONSE" | jq -r '.data.authorizationRequest // empty')"
-  SESSION_ID="$(echo "$PRESENT_RESPONSE" | jq -r '.data.verificationSession.id // empty')"
+PROOF_URL_FULL="$(echo "$PRESENT_FULL_RESPONSE" | jq -r '.data.authorizationRequest // empty')"
+SESSION_ID_FULL="$(echo "$PRESENT_FULL_RESPONSE" | jq -r '.data.verificationSession.id // empty')"
+echo "    Session ID (completa): $SESSION_ID_FULL"
 
-  echo "    Session ID: $SESSION_ID"
-  if [ -n "$PROOF_URL" ]; then
-    echo ""
-    echo "    ┌─ OID4VP Authorization Request ─────────────────────────────┐"
-    echo "    │ $PROOF_URL"
-    echo "    └────────────────────────────────────────────────────────────┘"
-    echo "    Holder scans this openid4vp:// URL in their OID4VP wallet"
-    echo "    to present the SD-JWT VC."
-    echo ""
-    echo "    Enviando email con QR a ${EMAIL_TO}..."
-    send_oid4vc_email "$EMAIL_TO" "OID4VP Proof Request — CDPI PoC" "$PROOF_URL" "" || true
-  fi
+if [ -n "$PROOF_URL_FULL" ]; then
+  echo ""
+  echo "    ┌─ OID4VP — Solicitud COMPLETA (7 campos) ───────────────────────┐"
+  echo "    │ given_name, family_name, document_number, employer_name,"
+  echo "    │ employment_status, position_title, employment_start_date"
+  echo "    ├────────────────────────────────────────────────────────────────┤"
+  echo "    │ $PROOF_URL_FULL"
+  echo "    └────────────────────────────────────────────────────────────────┘"
+  echo ""
+  echo "    Enviando email con QR a ${EMAIL_TO}..."
+  send_oid4vc_email "$EMAIL_TO" "OID4VP Solicitud COMPLETA (7 campos) — CDPI PoC" "$PROOF_URL_FULL" "" || true
 fi
 
 # ---------------------------------------------------------------------------
-# STEP 10 — Poll OID4VP session state
+# STEP 11 — OID4VP: solicitud PARCIAL (selective disclosure — 3 de 7 campos)
 # ---------------------------------------------------------------------------
 echo ""
-if [ -n "$SESSION_ID" ]; then
-  echo "[10/10] Poll OID4VP session state (3 attempts — needs holder to scan + present)"
-  # Poll GET /v1/orgs/{orgId}/oid4vp/verifier-presentation?id=<session-id>
-  # OID4VP state values: RequestCreated → RequestUriRetrieved → ResponseVerified | Error
+echo "[11/11] OID4VP — solicitud PARCIAL (Selective Disclosure: 3/7 campos)"
+# El DCQL claims[] solo lista 3 atributos.
+# La wallet solo revela esos 3 — los 4 restantes quedan como hashes en el SD-JWT.
+# El verifier SOLO RECIBE given_name, employment_status, employer_name.
+# Útil para "¿está empleado?" sin revelar salario, RUT, ni fecha de inicio.
+SESSION_ID_PARTIAL=""
+PRESENT_PARTIAL_PAYLOAD="$(jq -n \
+  --arg schemaId "$SCHEMA_ID" \
+  '{
+    requestSigner: { method: "DID" },
+    responseMode: "direct_post",
+    dcql: {
+      query: {
+        credentials: [
+          {
+            id:     "employment-partial",
+            format: "dc+sd-jwt",
+            meta:   { vct_values: [$schemaId] },
+            claims: [
+              { path: ["given_name"] },
+              { path: ["employment_status"] },
+              { path: ["employer_name"] }
+            ]
+          }
+        ]
+      }
+    }
+  }')"
+
+PRESENT_PARTIAL_RESPONSE="$(curl -sS -X POST \
+  "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/presentation?verifierId=$VERIFIER_DB_ID" \
+  "${AUTH[@]}" -d "$PRESENT_PARTIAL_PAYLOAD")"
+PRESENT_PARTIAL_STATUS="$(echo "$PRESENT_PARTIAL_RESPONSE" | jq -r '.statusCode // empty')"
+check_status "Solicitud parcial creada" "$PRESENT_PARTIAL_STATUS" "201"
+
+PROOF_URL_PARTIAL="$(echo "$PRESENT_PARTIAL_RESPONSE" | jq -r '.data.authorizationRequest // empty')"
+SESSION_ID_PARTIAL="$(echo "$PRESENT_PARTIAL_RESPONSE" | jq -r '.data.verificationSession.id // empty')"
+echo "    Session ID (parcial): $SESSION_ID_PARTIAL"
+
+if [ -n "$PROOF_URL_PARTIAL" ]; then
+  echo ""
+  echo "    ┌─ OID4VP — Solicitud PARCIAL (3/7 campos — Selective Disclosure) ┐"
+  echo "    │ Revelados:  given_name, employment_status, employer_name"
+  echo "    │ Omitidos:   family_name, document_number, position_title, employment_start_date"
+  echo "    ├────────────────────────────────────────────────────────────────┤"
+  echo "    │ $PROOF_URL_PARTIAL"
+  echo "    └────────────────────────────────────────────────────────────────┘"
+  echo ""
+  echo "    Enviando email con QR a ${EMAIL_TO}..."
+  send_oid4vc_email "$EMAIL_TO" "OID4VP Solicitud PARCIAL (SD: 3/7 campos) — CDPI PoC" "$PROOF_URL_PARTIAL" "" || true
+fi
+
+# Poll both sessions — 3 attempts each (5s apart)
+# In automated tests the holder won't scan in time; this shows the initial state.
+echo ""
+echo "    ── Polling sesiones (3 intentos × 2, 5s entre cada uno) ──"
+for entry in "completa:$SESSION_ID_FULL" "parcial:$SESSION_ID_PARTIAL"; do
+  sess_label="${entry%%:*}"
+  sess_id="${entry##*:}"
+  [ -z "$sess_id" ] && echo "    Sesión $sess_label: sin ID — saltando" && continue
+  echo ""
+  echo "    Sesión $sess_label ($sess_id):"
+  final_state="pending"
   for i in 1 2 3; do
     sleep 5
-    SESSION_RESPONSE="$(curl -sS \
-      "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/verifier-presentation?id=$SESSION_ID" \
+    SESS_RESP="$(curl -sS \
+      "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/verifier-presentation?id=$sess_id" \
       -H "Authorization: Bearer $TOKEN")"
-    SESSION_STATE="$(echo "$SESSION_RESPONSE" | jq -r '.data.state // .state // "unknown"' 2>/dev/null)"
-    echo "    Attempt $i — state: $SESSION_STATE"
-    if [ "$SESSION_STATE" = "ResponseVerified" ]; then
-      pass "OID4VP presentation verified"
+    SESS_STATE="$(echo "$SESS_RESP" | jq -r '.data.state // .state // "unknown"' 2>/dev/null)"
+    echo "      Intento $i — estado: $SESS_STATE"
+    if [ "$SESS_STATE" = "ResponseVerified" ]; then
+      pass "OID4VP presentación verificada ($sess_label)"
+      final_state="verified"
+      DISCLOSED="$(echo "$SESS_RESP" | jq '.data.presentationDocument // .data.claims // .data // empty' 2>/dev/null)"
+      echo "      Datos recibidos por el verifier:"
+      echo "$DISCLOSED" | jq -c . 2>/dev/null | head -c 500
+      echo ""
       break
-    elif [ "$SESSION_STATE" = "Error" ]; then
-      fail "OID4VP session error" "state=Error"
+    elif [ "$SESS_STATE" = "Error" ]; then
+      fail "OID4VP sesión con error ($sess_label)" "state=Error"
+      final_state="error"
       break
     fi
   done
-  echo "    (If state is 'RequestCreated', the holder has not yet scanned the QR."
-  echo "     This is expected in automated tests without a live OID4VP wallet.)"
-  PASS=$((PASS + 1))
-else
-  echo "[10/10] Skipped — no session ID (step 9 failed)"
-fi
+  if [ "$final_state" = "pending" ]; then
+    echo "      Estado final: $SESS_STATE (holder aún no presentó — normal en test sin wallet activa)"
+    PASS=$((PASS + 1))
+  fi
+done
+
+fi  # end if [ -n "$VERIFIER_DB_ID" ]
 
 # ---------------------------------------------------------------------------
 # Summary
