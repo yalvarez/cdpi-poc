@@ -16,8 +16,8 @@
 #     7. Create OID4VCI issuer + credential template
 #     8. Create credential offer → display openid-credential-offer:// URL + PIN
 #
-#   Steps 9-10 (Verification — OID4VP):
-#     9. Create OOB proof request (presentationExchange)
+#   Steps 9-10 (Verification — native OID4VP):
+#     9. Register OID4VP verifier + create authorization request (openid4vp://)
 #    10. Poll proof state
 #
 # Usage:
@@ -570,80 +570,79 @@ if [ -n "$OFFER_URL" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# STEP 9 — Create OOB proof request (Presentation Exchange — for did:key orgs)
+# STEP 9 — Native OID4VP verification (register verifier + create authorization request)
 # ---------------------------------------------------------------------------
 echo ""
-echo "[9/10] Create OOB proof request (presentationExchange)"
-# POST /orgs/{orgId}/proofs/oob?requestType=presentationExchange
-#
-# Must use requestType=presentationExchange for orgs with did:key / no_ledger schemas.
-# Indy proof format requires AnonCreds credentials from a ledger DID — using it with
-# did:key causes a Credo crash (TypeError in DidCommProofV1Protocol.createRequest).
-#
-# The DTO (SendProofRequestPayload) expects:
-#   - presentationDefinition: { id, name, purpose, input_descriptors[] }
-#   - comment, protocolVersion (v2 for PE), autoAcceptProof
-#
-# Credo routes the PE proof request to DIDComm OOB and returns an invitationUrl.
-# For SD-JWT holders (when PR #1279 lands), the wallet presents via OID4VP.
-PROOF_PAYLOAD="$(jq -n \
-  --arg schemaId "$SCHEMA_ID" \
+echo "[9/10] Native OID4VP: register verifier + create authorization request"
+# 9a — Register an OID4VP verifier (once per deployment, analogous to creating an OID4VCI issuer).
+# The verifierId slug is embedded in all subsequent OID4VP endpoints for this verifier.
+VERIFIER_SLUG="cdpi-poc-hr-verifier-${REQUEST_ID}"
+VERIFIER_PAYLOAD="$(jq -n \
+  --arg verifierId "$VERIFIER_SLUG" \
   '{
-    comment:"Employment verification - CDPI PoC OID4VP test",
-    protocolVersion:"v2",
-    presentationDefinition:{
-      id:"employment-verification-001",
-      name:"Employment Verification",
-      purpose:"Verify employment status",
-      input_descriptors:[
-        {
-          id:"given_name_descriptor",
-          name:"Given Name",
-          schema:[{uri:$schemaId}],
-          constraints:{
-            fields:[{path:["$.credentialSubject.given_name","$.given_name"]}]
-          }
-        },
-        {
-          id:"employer_name_descriptor",
-          name:"Employer Name",
-          schema:[{uri:$schemaId}],
-          constraints:{
-            fields:[{path:["$.credentialSubject.employer_name","$.employer_name"]}]
-          }
-        },
-        {
-          id:"employment_status_descriptor",
-          name:"Employment Status",
-          schema:[{uri:$schemaId}],
-          constraints:{
-            fields:[{path:["$.credentialSubject.employment_status","$.employment_status"]}]
-          }
-        }
-      ]
-    },
-    autoAcceptProof:"always"
+    verifierId: $verifierId,
+    clientMetadata: {
+      client_name: "CDPI PoC HR Portal"
+    }
   }')"
 
-PROOF_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/proofs/oob?requestType=presentationExchange" "${AUTH[@]}" -d "$PROOF_PAYLOAD")"
-PROOF_STATUS="$(echo "$PROOF_RESPONSE" | jq -r '.statusCode // empty')"
-check_status "OID4VP proof request created" "$PROOF_STATUS" "201"
+VERIFIER_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/verifier" "${AUTH[@]}" -d "$VERIFIER_PAYLOAD")"
+VERIFIER_STATUS="$(echo "$VERIFIER_RESPONSE" | jq -r '.statusCode // empty')"
+check_status "OID4VP verifier registered" "$VERIFIER_STATUS" "201"
 
 PROOF_ID=""
-if [ "$PROOF_STATUS" = "201" ]; then
-  PROOF_URL="$(echo "$PROOF_RESPONSE" | jq -r '.data.proofUrl // .data.invitationUrl // empty')"
-  # CREDEBL's oob proof endpoint only returns invitationUrl — no ID in the response.
-  # Query the proof list and take the most recently created presentationId.
-  # The single-proof endpoint uses presentationId, not the list's id field.
-  PROOF_ID="$(curl -sS "$BASE_URL/v1/orgs/$ORG_ID/proofs" -H "Authorization: Bearer $TOKEN" \
-    | jq -r '(.data.data // []) | sort_by(.createDateTime) | last | .presentationId // empty' 2>/dev/null)" || PROOF_ID=""
+VERIFIER_DB_ID="$(echo "$VERIFIER_RESPONSE" | jq -r '.data.id // empty')"
+if [ -z "$VERIFIER_DB_ID" ]; then
+  fail "Verifier DB ID extraction" "$(echo "$VERIFIER_RESPONSE" | jq -c .)"
+else
+  echo "    Verifier DB ID: $VERIFIER_DB_ID"
+
+  # 9b — Create OID4VP presentation request.
+  # The input_descriptor's vct filter ensures only credentials with this exact schema
+  # can satisfy the request — wallets that don't hold a matching SD-JWT VC will reject it.
+  # responseMode "direct_post" is the most widely supported by SD-JWT VC wallets.
+  PRESENT_PAYLOAD="$(jq -n \
+    --arg verifierId "$VERIFIER_DB_ID" \
+    --arg schemaId   "$SCHEMA_ID" \
+    '{
+      requestSigner: { verifierId: $verifierId },
+      responseMode: "direct_post",
+      presentationExchange: {
+        id: "employment-check-001",
+        input_descriptors: [
+          {
+            id:   "employment-descriptor",
+            name: "Employment Credential",
+            constraints: {
+              fields: [
+                {
+                  path:   ["$.vct"],
+                  filter: { type: "string", const: $schemaId }
+                },
+                { path: ["$.given_name"] },
+                { path: ["$.employment_status"] }
+              ]
+            }
+          }
+        ]
+      }
+    }')"
+
+  PRESENT_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/oid4vp/presentation" "${AUTH[@]}" -d "$PRESENT_PAYLOAD")"
+  PRESENT_STATUS="$(echo "$PRESENT_RESPONSE" | jq -r '.statusCode // empty')"
+  check_status "OID4VP authorization request created" "$PRESENT_STATUS" "201"
+
+  PROOF_URL="$(echo "$PRESENT_RESPONSE" | jq -r '.data.authorizationRequestUri // empty')"
+  PROOF_ID="$(echo "$PRESENT_RESPONSE" | jq -r '.data.presentationId // empty')"
+
   echo "    Proof ID: $PROOF_ID"
   if [ -n "$PROOF_URL" ]; then
     echo ""
-    echo "    ┌─ OID4VP Proof Request URL ──────────────────────────────────┐"
+    echo "    ┌─ OID4VP Authorization Request ─────────────────────────────┐"
     echo "    │ $PROOF_URL"
     echo "    └────────────────────────────────────────────────────────────┘"
-    echo "    Holder scans this URL in their wallet to present the SD-JWT VC."
+    echo "    Holder scans this openid4vp:// URL in their OID4VP wallet"
+    echo "    to present the SD-JWT VC."
     echo ""
     echo "    Enviando email con QR a ${EMAIL_TO}..."
     send_oid4vc_email "$EMAIL_TO" "OID4VP Proof Request — CDPI PoC" "$PROOF_URL" "" || true
