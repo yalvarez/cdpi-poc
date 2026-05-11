@@ -113,9 +113,14 @@ send_oid4vc_email() {
     }
   fi
 
-  local qr_file
+  local qr_file has_qr
   qr_file="$(mktemp /tmp/oid4vc_qr_XXXXXX.png)"
-  qrencode -o "$qr_file" -s 8 -m 3 "$url"
+  if qrencode -o "$qr_file" -s 8 -m 3 "$url" 2>/dev/null; then
+    has_qr=true
+  else
+    has_qr=false
+    rm -f "$qr_file"
+  fi
 
   local pin_block=""
   if [ -n "$pin" ]; then
@@ -125,7 +130,7 @@ send_oid4vc_email() {
   local py_script
   py_script="$(mktemp /tmp/send_offer_XXXXXX.py)"
   cat > "$py_script" << PYEOF
-import smtplib, ssl, os, sys, base64
+import smtplib, ssl, os, sys
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
@@ -140,7 +145,11 @@ to_addr   = sys.argv[1]
 subject   = sys.argv[2]
 url       = sys.argv[3]
 pin_block = sys.argv[4]
-qr_path   = sys.argv[5]
+qr_path   = sys.argv[5]   # empty string = no QR
+
+has_qr = bool(qr_path)
+qr_section = '<p style="text-align:center"><img src="cid:qrcode" alt="QR code" style="width:220px;height:220px"></p>' if has_qr else \
+             '<p style="color:#888;font-size:12px">(URL demasiado larga para QR — copia el enlace de abajo)</p>'
 
 msg = MIMEMultipart('related')
 msg['Subject'] = subject
@@ -150,8 +159,8 @@ msg['To']      = to_addr
 html = f"""
 <html><body style="font-family:sans-serif;max-width:540px;margin:0 auto;padding:24px">
   <h2 style="color:#2d5be3">CDPI PoC — {subject}</h2>
-  <p>Escanea el QR con tu wallet OID4VCI o copia el URL de oferta:</p>
-  <p style="text-align:center"><img src="cid:qrcode" alt="QR code" style="width:220px;height:220px"></p>
+  <p>Escanea el QR con tu wallet o copia el URL:</p>
+  {qr_section}
   {pin_block}
   <p style="word-break:break-all;font-size:12px;color:#555;background:#f9f9f9;padding:10px;border-radius:6px">{url}</p>
   <hr style="margin-top:32px;border:none;border-top:1px solid #eee">
@@ -164,11 +173,12 @@ alt.attach(MIMEText(url, 'plain'))
 alt.attach(MIMEText(html, 'html'))
 msg.attach(alt)
 
-with open(qr_path, 'rb') as f:
-    img = MIMEImage(f.read(), _subtype='png')
-    img.add_header('Content-ID', '<qrcode>')
-    img.add_header('Content-Disposition', 'inline', filename='qr.png')
-    msg.attach(img)
+if has_qr:
+    with open(qr_path, 'rb') as f:
+        img = MIMEImage(f.read(), _subtype='png')
+        img.add_header('Content-ID', '<qrcode>')
+        img.add_header('Content-Disposition', 'inline', filename='qr.png')
+        msg.attach(img)
 
 with smtplib.SMTP(smtp_host, smtp_port) as s:
     s.ehlo()
@@ -179,8 +189,11 @@ with smtplib.SMTP(smtp_host, smtp_port) as s:
 print('sent')
 PYEOF
 
+  local qr_arg=""
+  [ "$has_qr" = "true" ] && qr_arg="$qr_file"
+
   local result
-  result="$(python3 "$py_script" "$to" "$subject" "$url" "$pin_block" "$qr_file" 2>&1)"
+  result="$(python3 "$py_script" "$to" "$subject" "$url" "$pin_block" "$qr_arg" 2>&1)"
   rm -f "$py_script" "$qr_file"
   if [ "$result" = "sent" ]; then
     echo "    Email enviado a $to"
