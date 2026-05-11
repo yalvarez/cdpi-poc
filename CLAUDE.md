@@ -1,7 +1,7 @@
 # CLAUDE.md — Project Context & Memory
 ## CDPI PoC Technical Repository
 
-**Last updated**: April 21, 2026  
+**Last updated**: May 11, 2026  
 **Purpose**: This file gives Claude complete context to continue working on this project without needing to re-explain everything. Read this first before any session.
 
 ---
@@ -187,7 +187,7 @@ CREDEBL's `agent-provisioning` spawns the Credo controller container via the Doc
 
 This is hardcoded in `init-credebl.sh` and the `docker-compose.yml` fallback default. Do not change to the VPS hostname/IP.
  
-### Ten required CREDEBL container patches (automated in init-credebl.sh)
+### Twelve required CREDEBL container patches (automated in init-credebl.sh)
 
 These patches fix bugs in the published CREDEBL Docker images. `init-credebl.sh` applies them automatically via `apply_container_patches()` after every `docker compose up`. All are idempotent.
 
@@ -230,6 +230,14 @@ _Symptom if missing_: Credential issuance succeeds (email arrives) but the crede
 **Patch 10 — Issuance service QR code attachment is corrupted binary**
 The QR code is generated as a base64 data URL (`data:image/png;base64,...`) and split to extract the raw base64 string before attaching. Without `encoding: 'base64'` in the nodemailer attachment definition, nodemailer treats the string as UTF-8 text and MIME-encodes the literal base64 characters — recipients receive a text file containing "iVBORw0KGgo..." rather than a binary PNG image. Fix: add `encoding: 'base64'` so nodemailer decodes the base64 string back to binary before transfer. Also corrects `disposition: 'attachment'` to `contentDisposition: 'attachment'` (nodemailer's canonical field name). Guard string: `PATCH10: qr encoding`.
 _Symptom if missing_: QR code email attachment appears to arrive (file is attached) but cannot be opened as an image — the file contains the raw base64 text, not PNG binary data.
+
+**Patch 11 — Verification service QR code attachment is corrupted binary**
+Same root cause as Patch 10 but in the verification service. The OOB proof-request QR code email has the same nodemailer encoding bug. Fix: add `encoding: 'base64'` and correct `contentDisposition: 'attachment'` in the verification service's email attachment for `/app/dist/apps/verification/main.js`. Guard string: `PATCH11: qr encoding`.
+_Symptom if missing_: Proof-request QR code email arrives with un-openable image attachment containing raw base64 text.
+
+**Patch 12 — Issuance service QR code encodes raw MinIO path instead of full deeplink URL**
+`QRCode.toDataURL` was called with `shortenUrl` (the raw MinIO object path, e.g. `/default/<uuid>`) instead of `deepLinkURL` (which has `DEEPLINK_DOMAIN` prepended via `convertUrlToDeepLinkUrl(shortenUrl)`). Wallet apps cannot resolve a bare path — they need the full URL. The email body's text link was already using `deepLinkURL` correctly; only the QR image was wrong. Fix: replace `QRCode.toDataURL(shortenUrl, qrCodeOptions)` with `QRCode.toDataURL(deepLinkURL, qrCodeOptions)` in `/app/dist/apps/issuance/main.js`. Guard string: `PATCH12: qr uses deepLinkURL`.
+_Symptom if missing_: QR code in JSON-LD credential email scans to `/default/<uuid>` — wallet cannot open it. The text link in the same email works correctly.
 
 ### Platform-admin tenant wallet and DID creation (Patch — automated in init-credebl.sh)
 
