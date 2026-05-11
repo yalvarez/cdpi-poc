@@ -95,8 +95,52 @@ check_status() {
 }
 
 # ---------------------------------------------------------------------------
+# nginx_qr_shorten <long_url> <https_domain>
+#   When a URL is too long for a QR code, writes a redirect HTML to
+#   /var/www/qr/<token>.html and ensures nginx serves location /qr/ from
+#   /var/www (idempotent — only modifies nginx if the location is absent).
+#   Prints the short https://<domain>/qr/<token>.html URL.
+# ---------------------------------------------------------------------------
+nginx_qr_shorten() {
+  local long_url="$1" domain="$2"
+  local token qr_dir nginx_conf
+  token="$(openssl rand -hex 8)"
+  qr_dir="/var/www/qr"
+  mkdir -p "$qr_dir"
+  cat > "${qr_dir}/${token}.html" << HTMLEOF
+<!DOCTYPE html><html><head>
+<meta http-equiv="refresh" content="0;url=${long_url}">
+<title>Abriendo wallet...</title>
+</head><body>
+<p>Abriendo wallet... <a href="${long_url}">Toca aquí si no redirige automáticamente</a></p>
+</body></html>
+HTMLEOF
+  chmod 644 "${qr_dir}/${token}.html"
+  # Add /qr/ static location to the CREDEBL nginx server block (once)
+  nginx_conf="$(grep -rl "server_name ${domain}" /etc/nginx/sites-available/ 2>/dev/null | head -1)"
+  if [ -n "$nginx_conf" ] && ! grep -q 'location /qr/' "$nginx_conf"; then
+    python3 - "$nginx_conf" << 'PYEOF'
+import sys
+conf = sys.argv[1]
+with open(conf) as f:
+    content = f.read()
+if 'location /qr/' not in content:
+    loc = '\n    location /qr/ { root /var/www; try_files $uri =404; }\n'
+    idx = content.rfind('}')
+    content = content[:idx] + loc + content[idx:]
+    with open(conf, 'w') as f:
+        f.write(content)
+PYEOF
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+  fi
+  echo "https://${domain}/qr/${token}.html"
+}
+
+# ---------------------------------------------------------------------------
 # send_oid4vc_email <to> <subject> <url> <pin>
 #   Generates a QR code for <url> and sends an HTML email via Brevo SMTP.
+#   When URL is too long for direct QR (DIDComm OOB), creates a short nginx
+#   redirect and encodes that instead.
 #   Reads SMTP_HOST/PORT/USER/PASS and EMAIL_FROM from the environment.
 #   pin may be empty (for proof-request emails).
 #   Installs qrencode on first call if not present.
@@ -115,11 +159,26 @@ send_oid4vc_email() {
 
   local qr_file has_qr
   qr_file="$(mktemp /tmp/oid4vc_qr_XXXXXX.png)"
+  has_qr=false
+
   if qrencode -o "$qr_file" -s 8 -m 3 "$url" 2>/dev/null; then
     has_qr=true
   else
-    has_qr=false
     rm -f "$qr_file"
+    # URL too long — shorten via nginx redirect and try again
+    if [[ "${BASE_URL:-}" =~ ^https:// ]]; then
+      local domain short_url
+      domain="${BASE_URL#https://}"
+      short_url="$(nginx_qr_shorten "$url" "$domain" 2>/dev/null)" || short_url=""
+      if [ -n "$short_url" ]; then
+        qr_file="$(mktemp /tmp/oid4vc_qr_XXXXXX.png)"
+        if qrencode -o "$qr_file" -s 8 -m 3 "$short_url" 2>/dev/null; then
+          has_qr=true
+        else
+          rm -f "$qr_file"
+        fi
+      fi
+    fi
   fi
 
   local pin_block=""
