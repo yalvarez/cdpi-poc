@@ -579,10 +579,12 @@ echo "[9/10] Native OID4VP: register verifier + create authorization request"
 VERIFIER_SLUG="cdpi-poc-hr-verifier-${REQUEST_ID}"
 VERIFIER_PAYLOAD="$(jq -n \
   --arg verifierId "$VERIFIER_SLUG" \
+  --arg logoUri    "${BASE_URL}/logo.png" \
   '{
     verifierId: $verifierId,
     clientMetadata: {
-      client_name: "CDPI PoC HR Portal"
+      client_name: "CDPI PoC HR Portal",
+      logo_uri:    $logoUri
     }
   }')"
 
