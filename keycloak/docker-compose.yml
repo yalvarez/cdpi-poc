@@ -60,7 +60,8 @@ services:
       KC_LOG_LEVEL: INFO
     ports:
       - "${KEYCLOAK_PORT:-8080}:8080"
-      - "9000:9000"
+      # Puerto 9000 (management) NO publicado externamente — conflicto con MinIO (CREDEBL).
+      # El health check usa el estado de Docker directamente (ver init-keycloak.sh).
     depends_on:
       postgres:
         condition: service_healthy

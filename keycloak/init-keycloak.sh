@@ -308,9 +308,9 @@ ok "Servicios iniciados."
 
 # ── Esperar Keycloak ───────────────────────────────────────────────────────────
 echo ""
-info "Esperando que Keycloak esté listo (puede tomar hasta 90s)..."
-# Puerto 9000 (management) siempre publicado — válido en modo HTTP y SSL.
-KC_CHECK_URL="http://localhost:9000/health/ready"
+info "Esperando que Keycloak esté listo (puede tomar hasta 3 min)..."
+# Puerto 9000 (management) no publicado externamente para evitar conflicto con MinIO.
+# Usamos el estado de health de Docker (el healthcheck interno verifica el puerto 8080).
 
 MAX_RETRIES=36   # 36 × 5s = 3 min máximo
 RETRY_DELAY=5
@@ -318,7 +318,9 @@ attempt=0
 
 while [ $attempt -lt $MAX_RETRIES ]; do
   attempt=$((attempt + 1))
-  if curl -sf "$KC_CHECK_URL" >/dev/null 2>&1; then
+  # shellcheck disable=SC2086
+  kc_health=$(docker compose $COMPOSE_FILES ps --format '{{.Health}}' keycloak 2>/dev/null || true)
+  if [ "$kc_health" = "healthy" ]; then
     ok "Keycloak listo (${attempt}×${RETRY_DELAY}s)."
     break
   fi
