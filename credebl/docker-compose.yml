@@ -221,6 +221,8 @@ services:
     command: ["python3", "/oob-redirect.py"]
     volumes:
       - ./oob-redirect.py:/oob-redirect.py:ro
+    ports:
+      - "127.0.0.1:3011:3011"
     networks:
       - credebl-net
     depends_on:
