@@ -118,7 +118,7 @@ CREATE_ORG_PAYLOAD="$(jq -n \
   --arg website "https://cdpi-poc.local" \
   '{name:$name, description:$description, website:$website, countryId:null, stateId:null, cityId:null, logo:""}')"
 
-CREATE_ORG_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs" "${auth_header[@]}" -d "$CREATE_ORG_PAYLOAD")"
+CREATE_ORG_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs" "${auth_header[@]}" -d "$CREATE_ORG_PAYLOAD")"
 ORG_ID="$(echo "$CREATE_ORG_RESPONSE" | jq -r '.data.id // .id // empty')"
 
 if [ -z "$ORG_ID" ]; then
@@ -131,7 +131,7 @@ echo "Organization ID: $ORG_ID"
 
 echo "[4/8] Spin up shared wallet"
 WALLET_PAYLOAD="$(jq -n --arg label "ApiE2EWallet$REQUEST_ID" '{label:$label, clientSocketId:""}')"
-WALLET_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/agents/wallet" "${auth_header[@]}" -d "$WALLET_PAYLOAD")"
+WALLET_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/agents/wallet" "${auth_header[@]}" -d "$WALLET_PAYLOAD")"
 echo "$WALLET_RESPONSE" | jq '{statusCode, message}'
 
 WALLET_STATUS="$(echo "$WALLET_RESPONSE" | jq -r '.statusCode // empty')"
@@ -144,12 +144,12 @@ fi
 echo "[5/8] Create DID (did:key)"
 DID_SEED="$(openssl rand -hex 16)"
 DID_PAYLOAD="{\"seed\":\"$DID_SEED\",\"keyType\":\"ed25519\",\"method\":\"key\",\"ledger\":\"\",\"privatekey\":\"\",\"network\":\"\",\"domain\":\"\",\"role\":\"\",\"endorserDid\":\"\",\"clientSocketId\":\"\",\"isPrimaryDid\":true}"
-DID_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/agents/did" "${auth_header[@]}" -d "$DID_PAYLOAD")"
+DID_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/agents/did" "${auth_header[@]}" -d "$DID_PAYLOAD")"
 echo "$DID_RESPONSE" | jq '{statusCode, message, did: (.did // .data.did // "")}'
 
 ORG_DID=""
 for _ in $(seq 1 20); do
-  ORG_RESPONSE="$(curl -sS "$BASE_URL/orgs/$ORG_ID" -H "Authorization: Bearer $TOKEN")"
+  ORG_RESPONSE="$(curl -sS "$BASE_URL/v1/orgs/$ORG_ID" -H "Authorization: Bearer $TOKEN")"
   ORG_DID="$(echo "$ORG_RESPONSE" | jq -r '.data.org_agents[0].orgDid // empty')"
   if [ -n "$ORG_DID" ]; then
     break
@@ -192,14 +192,14 @@ SCHEMA_CREATE_PAYLOAD="$(jq -n \
     }
   }')"
 
-SCHEMA_CREATE_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/schemas" "${auth_header[@]}" -d "$SCHEMA_CREATE_PAYLOAD")"
+SCHEMA_CREATE_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/schemas" "${auth_header[@]}" -d "$SCHEMA_CREATE_PAYLOAD")"
 echo "$SCHEMA_CREATE_RESPONSE" | jq '{statusCode, message}'
 
 SCHEMA_ID_RAW="$(echo "$SCHEMA_CREATE_RESPONSE" | jq -r '.data.schemaLedgerId // .data.schemaId // .data.id // empty')"
 
 if [ -z "$SCHEMA_ID_RAW" ]; then
   # Fallback: pull first schema template used by issuance for W3C
-  TEMPLATES_RESPONSE="$(curl -sS "$BASE_URL/orgs/$ORG_ID/credentials/bulk/template?schemaType=w3c" -H "Authorization: Bearer $TOKEN")"
+  TEMPLATES_RESPONSE="$(curl -sS "$BASE_URL/v1/orgs/$ORG_ID/credentials/bulk/template?schemaType=w3c" -H "Authorization: Bearer $TOKEN")"
   SCHEMA_ID_RAW="$(echo "$TEMPLATES_RESPONSE" | jq -r '.data[0].schemaIdentifier // empty')"
 fi
 
@@ -251,7 +251,7 @@ ISSUANCE_PAYLOAD="$(jq -n \
 ISSUE_RESPONSE=""
 ISSUE_STATUS=""
 for attempt in $(seq 1 6); do
-  ISSUE_RESPONSE="$(curl -sS -X POST "$BASE_URL/orgs/$ORG_ID/credentials/oob/email?credentialType=jsonld" "${auth_header[@]}" -d "$ISSUANCE_PAYLOAD")"
+  ISSUE_RESPONSE="$(curl -sS -X POST "$BASE_URL/v1/orgs/$ORG_ID/credentials/oob/email?credentialType=jsonld" "${auth_header[@]}" -d "$ISSUANCE_PAYLOAD")"
   ISSUE_STATUS="$(echo "$ISSUE_RESPONSE" | jq -r '.statusCode // empty')"
 
   if [ "$ISSUE_STATUS" = "201" ]; then
@@ -264,7 +264,7 @@ done
 echo "$ISSUE_RESPONSE" | jq .
 
 echo "[8/8] Fetch issued credential list (sanity check endpoint)"
-LIST_RESPONSE="$(curl -sS "$BASE_URL/orgs/$ORG_ID/credentials?pageSize=10&pageNumber=1&search=&sortBy=desc&sortField=createDateTime" -H "Authorization: Bearer $TOKEN")"
+LIST_RESPONSE="$(curl -sS "$BASE_URL/v1/orgs/$ORG_ID/credentials?pageSize=10&pageNumber=1&search=&sortBy=desc&sortField=createDateTime" -H "Authorization: Bearer $TOKEN")"
 echo "$LIST_RESPONSE" | jq '{statusCode, message, total: (.data.totalItems // .data.totalRecords // 0)}'
 
 echo "Done."
